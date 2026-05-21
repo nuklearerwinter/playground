@@ -10,7 +10,8 @@
   .intro { color: #555; font-size: 0.95em; margin: 0 0 1em; }
   .controls { background: #f4f4f4; padding: 1em 1.2em; border-radius: 8px; margin-bottom: 1.2em; }
   .controls fieldset { border: 1px solid #bbb; border-radius: 4px; display: inline-block; padding: 0.2em 0.8em; margin-right: 0.8em; vertical-align: middle; }
-  .controls label { margin-right: 0.5em; }
+  .controls label { display: inline-flex; align-items: center; gap: 0.3em; margin-right: 0.5em; }
+  .controls label input[type="radio"] { margin: 0; }
   button { padding: 0.55em 1.1em; font-size: 1em; cursor: pointer; margin: 0.2em 0.2em; border-radius: 4px; border: 1.5px solid var(--accent); background: white; color: var(--accent); font-family: inherit; }
   button:hover:not(:disabled) { background: var(--accent); color: white; }
   button:disabled { opacity: 0.5; cursor: progress; }
@@ -28,7 +29,9 @@
   table#grid { border-collapse: collapse; margin: 1.4em auto 1em; }
   table#grid th { width: 2.6em; height: 2.6em; font-size: 1.6em; color: var(--accent); font-family: Georgia, serif; font-weight: bold; }
   table#grid td { width: 2.6em; height: 2.6em; border: 1.5px solid #222; text-align: center; font-size: 1.6em; vertical-align: middle; background: white; font-family: Georgia, serif; }
-  .solution-code { font-family: "Courier New", monospace; background: #f7f7f7; padding: 0.7em 0.9em; border-radius: 4px; margin: 0.8em 0; word-break: break-all; }
+  .difficulty-display { font-size: 1em; color: #444; margin: 0.4em 0 0.2em; font-style: italic; }
+  .difficulty-display span { font-style: normal; font-weight: bold; color: var(--accent); }
+  .solution-code { font-family: "Courier New", monospace; background: #f7f7f7; padding: 0.7em 0.9em; border-radius: 4px; margin: 0.8em 0; word-break: break-all; text-align: center; }
   .solution-code .code-value { font-size: 1.05em; letter-spacing: 0.04em; font-weight: bold; color: #333; }
   .solution-code small { display: block; color: #666; margin-top: 0.3em; font-family: Georgia, serif; }
   .reveal { display: flex; gap: 0.4em; flex-wrap: wrap; align-items: center; margin: 1em 0; }
@@ -44,6 +47,7 @@
     table#grid { margin: 0.6cm auto; }
     table#grid th { width: 1.7cm; height: 1.7cm; font-size: 16pt; }
     table#grid td { width: 1.7cm; height: 1.7cm; font-size: 14pt; }
+    .difficulty-display { font-size: 10pt; margin: 0.1cm 0; }
     .hints h3 { font-size: 11pt; margin: 0.15cm 0; }
     .hints li { margin: 0.04cm 0; line-height: 1.25; }
     .solution-code { background: none; padding: 0; font-size: 9pt; word-break: break-all; }
@@ -74,15 +78,10 @@
       <progress id="progress-bar" max="100" value="0"></progress>
       <span id="status">Erzeuge Rätsel …</span>
     </div>
-    <div class="reveal">
-      <input type="text" id="code-input" placeholder="Lösungscode eingeben …" autocomplete="off" spellcheck="false">
-      <button id="reveal-btn">Lösung zeigen</button>
-      <button id="hide-btn">Lösung verbergen</button>
-    </div>
-    <div id="error"></div>
   </section>
 
   <section id="puzzle" hidden>
+    <div class="difficulty-display" id="difficulty-display" hidden>Schwierigkeit: <span id="difficulty-label"></span></div>
     <div class="hints" id="hints-block" hidden>
       <h3>Besonderheiten der Reihen:</h3>
       <ol id="row-hints"></ol>
@@ -92,10 +91,17 @@
     <table id="grid"></table>
     <div class="solution-code" id="code-block" hidden>
       <strong>Lösungscode:</strong> <span id="code" class="code-value">—</span>
-      <small>Notieren Sie sich diesen Code. Tippen Sie ihn unten ein, um die Lösung einzublenden.</small>
+      <small>Notieren Sie sich diesen Code, um die Lösung später wieder einzublenden.</small>
     </div>
-    <div class="footer">LOGISCH Spezial – Generator</div>
   </section>
+
+  <div class="reveal">
+    <input type="text" id="code-input" placeholder="Lösungscode eingeben …" autocomplete="off" spellcheck="false">
+    <button id="reveal-btn">Lösung zeigen</button>
+    <button id="hide-btn">Lösung verbergen</button>
+  </div>
+  <div id="error"></div>
+  <div class="footer">LOGISCH Spezial – Generator</div>
 
 <script>
 "use strict";
@@ -885,7 +891,7 @@ async function generate() {
   }
 
   const code = encodeGrid(result.grid);
-  currentPuzzle = { grid: result.grid, clues: result.clues, code };
+  currentPuzzle = { grid: result.grid, clues: result.clues, code, difficulty };
   renderPuzzle(currentPuzzle);
   progress.hidden = true;
   btn.disabled = false;
@@ -923,10 +929,14 @@ function ensureGridTable() {
   if (!tbl.children.length) buildGridTable();
 }
 
+const DIFFICULTY_LABELS = { easy: "Leicht", medium: "Mittel", hard: "Schwer" };
+
 function renderPuzzle(p) {
   document.getElementById("puzzle").hidden = false;
   document.getElementById("hints-block").hidden = false;
   document.getElementById("code-block").hidden = false;
+  document.getElementById("difficulty-display").hidden = false;
+  document.getElementById("difficulty-label").textContent = DIFFICULTY_LABELS[p.difficulty] || p.difficulty;
 
   const rowHints = document.getElementById("row-hints");
   rowHints.innerHTML = "";
@@ -947,7 +957,7 @@ function renderPuzzle(p) {
 
   buildGridTable();
   document.getElementById("code").textContent = p.code;
-  document.getElementById("code-input").value = "";
+  document.getElementById("code-input").value = p.code;
   document.getElementById("error").textContent = "";
   clearGridCells();
 }
@@ -957,6 +967,7 @@ function showSolution(grid) {
   document.getElementById("puzzle").hidden = false;
   document.getElementById("hints-block").hidden = !currentPuzzle;
   document.getElementById("code-block").hidden = !currentPuzzle;
+  document.getElementById("difficulty-display").hidden = !currentPuzzle;
   const cells = document.getElementById("grid").querySelectorAll("td");
   for (const td of cells) {
     td.textContent = grid[+td.dataset.r][+td.dataset.c];
