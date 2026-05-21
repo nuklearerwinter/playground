@@ -1,0 +1,992 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Logicals Rätselgenerator</title>
+<style>
+  :root { --accent: #1a8c8c; }
+  body { font-family: Georgia, "Times New Roman", serif; max-width: 820px; margin: 1em auto; padding: 0 1em; color: #222; }
+  h1 { color: var(--accent); margin: 0 0 0.2em; }
+  .intro { color: #555; font-size: 0.95em; margin: 0 0 1em; }
+  .controls { background: #f4f4f4; padding: 1em 1.2em; border-radius: 8px; margin-bottom: 1.2em; }
+  .controls fieldset { border: 1px solid #bbb; border-radius: 4px; display: inline-block; padding: 0.2em 0.8em; margin-right: 0.8em; vertical-align: middle; }
+  .controls label { margin-right: 0.5em; }
+  button { padding: 0.55em 1.1em; font-size: 1em; cursor: pointer; margin: 0.2em 0.2em; border-radius: 4px; border: 1.5px solid var(--accent); background: white; color: var(--accent); font-family: inherit; }
+  button:hover:not(:disabled) { background: var(--accent); color: white; }
+  button:disabled { opacity: 0.5; cursor: progress; }
+  #progress { display: flex; align-items: center; gap: 0.7em; margin-top: 0.7em; color: #555; }
+  #progress[hidden] { display: none; }
+  #puzzle[hidden] { display: none; }
+  #progress-bar { width: 220px; height: 0.9em; appearance: none; -webkit-appearance: none; border: 1px solid #bbb; border-radius: 4px; overflow: hidden; background: #eee; }
+  #progress-bar::-webkit-progress-bar { background: #eee; }
+  #progress-bar::-webkit-progress-value { background: var(--accent); transition: width 0.08s linear; }
+  #progress-bar::-moz-progress-bar { background: var(--accent); }
+  .hints h3 { margin: 0.6em 0 0.3em; font-size: 1.05em; color: #333; }
+  .hints ol { list-style: none; padding-left: 0.2em; margin: 0 0 0.6em; }
+  .hints li { margin: 0.2em 0; line-height: 1.45; }
+  .hints .label { display: inline-block; min-width: 1.8em; font-weight: bold; color: var(--accent); }
+  table#grid { border-collapse: collapse; margin: 1.4em auto 1em; }
+  table#grid th { width: 2.6em; height: 2.6em; font-size: 1.6em; color: var(--accent); font-family: Georgia, serif; font-weight: bold; }
+  table#grid td { width: 2.6em; height: 2.6em; border: 1.5px solid #222; text-align: center; font-size: 1.6em; vertical-align: middle; background: white; font-family: Georgia, serif; }
+  .solution-code { font-family: "Courier New", monospace; background: #f7f7f7; padding: 0.7em 0.9em; border-radius: 4px; margin: 0.8em 0; word-break: break-all; }
+  .solution-code .code-value { font-size: 1.05em; letter-spacing: 0.04em; font-weight: bold; color: #333; }
+  .solution-code small { display: block; color: #666; margin-top: 0.3em; font-family: Georgia, serif; }
+  .reveal { display: flex; gap: 0.4em; flex-wrap: wrap; align-items: center; margin: 1em 0; }
+  .reveal input { padding: 0.55em 0.6em; font-family: "Courier New", monospace; flex: 1; min-width: 220px; border: 1px solid #bbb; border-radius: 4px; font-size: 1em; }
+  #error { color: #c33; min-height: 1.2em; margin: 0.3em 0; font-style: italic; }
+  .footer { text-align: right; color: #888; font-size: 0.9em; font-style: italic; margin-top: 1em; }
+
+  @media print {
+    body { max-width: none; margin: 0; padding: 0.5cm; font-size: 11pt; }
+    .controls, .reveal, #error, #progress, header > details { display: none !important; }
+    h1 { font-size: 14pt; margin: 0 0 0.2cm; }
+    .intro { font-size: 9.5pt; margin: 0 0 0.3cm; color: #333; line-height: 1.3; }
+    table#grid { margin: 0.6cm auto; }
+    table#grid th { width: 1.7cm; height: 1.7cm; font-size: 16pt; }
+    table#grid td { width: 1.7cm; height: 1.7cm; font-size: 14pt; }
+    .hints h3 { font-size: 11pt; margin: 0.15cm 0; }
+    .hints li { margin: 0.04cm 0; line-height: 1.25; }
+    .solution-code { background: none; padding: 0; font-size: 9pt; word-break: break-all; }
+    .solution-code small { display: none; }
+    .footer { display: none; }
+    @page { size: A4 portrait; margin: 1.2cm; }
+  }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Logicals Spezial</h1>
+    <p class="intro">Setzen Sie die Zahlen von 1 bis 9 jeweils viermal in das Diagramm ein.
+      Gleiche Zahlen grenzen waagerecht und senkrecht niemals aneinander, wohl aber diagonal.
+      Kommen je Reihe oder Spalte Zahlen öfter als einmal vor, wird ausdrücklich darauf hingewiesen.</p>
+  </header>
+
+  <section class="controls" id="controls">
+    <fieldset>
+      <legend>Schwierigkeit</legend>
+      <label><input type="radio" name="difficulty" value="easy"> Leicht</label>
+      <label><input type="radio" name="difficulty" value="medium" checked> Mittel</label>
+      <label><input type="radio" name="difficulty" value="hard"> Schwer</label>
+    </fieldset>
+    <button id="generate-btn">Neues Rätsel</button>
+    <button id="print-btn" disabled>Drucken</button>
+    <div id="progress" hidden>
+      <progress id="progress-bar" max="100" value="0"></progress>
+      <span id="status">Erzeuge Rätsel …</span>
+    </div>
+    <div class="reveal">
+      <input type="text" id="code-input" placeholder="Lösungscode eingeben …" autocomplete="off" spellcheck="false">
+      <button id="reveal-btn">Lösung zeigen</button>
+      <button id="hide-btn">Lösung verbergen</button>
+    </div>
+    <div id="error"></div>
+  </section>
+
+  <section id="puzzle" hidden>
+    <div class="hints" id="hints-block" hidden>
+      <h3>Besonderheiten der Reihen:</h3>
+      <ol id="row-hints"></ol>
+      <h3>Besonderheiten der Spalten:</h3>
+      <ol id="col-hints"></ol>
+    </div>
+    <table id="grid"></table>
+    <div class="solution-code" id="code-block" hidden>
+      <strong>Lösungscode:</strong> <span id="code" class="code-value">—</span>
+      <small>Notieren Sie sich diesen Code. Tippen Sie ihn unten ein, um die Lösung einzublenden.</small>
+    </div>
+    <div class="footer">LOGISCH Spezial – Generator</div>
+  </section>
+
+<script>
+"use strict";
+
+// === Main-thread constants & helpers ===
+const N = 6;
+const ROW_LABELS = ["A","B","C","D","E","F"];
+const COL_LABELS = ["1","2","3","4","5","6"];
+const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+function cellLabel(r, c) { return ROW_LABELS[r] + COL_LABELS[c]; }
+
+function clueText(clue) {
+  switch (clue.type) {
+    case "duplicate":
+      return `Die ${clue.value} kommt doppelt vor.`;
+    case "pairSum": {
+      const [a, b] = clue.cells;
+      return `${cellLabel(a[0],a[1])} plus ${cellLabel(b[0],b[1])} ergibt ${clue.value}.`;
+    }
+    case "totalSum":
+      return `Die Summe aller sechs Zahlen lautet ${clue.value}.`;
+    case "directSequence":
+      return clue.scope === "row"
+        ? "Die Zahlen sind von links nach rechts direkt aufeinanderfolgend angeordnet."
+        : "Die Zahlen sind von oben nach unten direkt aufeinanderfolgend angeordnet.";
+    case "ascending":
+      return clue.scope === "row"
+        ? "Die Zahlen sind von links nach rechts aufsteigend angeordnet (ggf. mit Lücken)."
+        : "Die Zahlen sind von oben nach unten aufsteigend angeordnet (ggf. mit Lücken).";
+    case "descending":
+      return clue.scope === "row"
+        ? "Die Zahlen sind von links nach rechts absteigend angeordnet (ggf. mit Lücken)."
+        : "Die Zahlen sind von oben nach unten absteigend angeordnet (ggf. mit Lücken).";
+  }
+  return "?";
+}
+
+function encodeGrid(grid) {
+  const bits = [];
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+    const v = grid[r][c];
+    for (let b = 3; b >= 0; b--) bits.push((v >> b) & 1);
+  }
+  let sum = 0;
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) sum = (sum + grid[r][c]) % 256;
+  for (let b = 7; b >= 0; b--) bits.push((sum >> b) & 1);
+  while (bits.length % 5 !== 0) bits.push(0);
+  let out = "";
+  for (let i = 0; i < bits.length; i += 5) {
+    const v = (bits[i]<<4) | (bits[i+1]<<3) | (bits[i+2]<<2) | (bits[i+3]<<1) | bits[i+4];
+    out += ALPHABET[v];
+  }
+  return out.match(/.{1,4}/g).join("-");
+}
+
+function decodeCode(code) {
+  if (!code) return null;
+  const clean = code.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (clean.length < 31) return null;
+  const bits = [];
+  for (let i = 0; i < 31; i++) {
+    const v = ALPHABET.indexOf(clean[i]);
+    if (v < 0) return null;
+    for (let b = 4; b >= 0; b--) bits.push((v >> b) & 1);
+  }
+  const grid = Array.from({length: N}, () => Array(N).fill(0));
+  let idx = 0;
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+    let v = 0;
+    for (let b = 0; b < 4; b++) v = (v << 1) | bits[idx++];
+    if (v < 1 || v > 9) return null;
+    grid[r][c] = v;
+  }
+  let cs = 0;
+  for (let b = 0; b < 8; b++) cs = (cs << 1) | bits[idx++];
+  let actual = 0;
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) actual = (actual + grid[r][c]) % 256;
+  if (cs !== actual) return null;
+  return grid;
+}
+
+// === Worker code (self-contained; runs in a Web Worker) ===
+function workerCode() {
+  "use strict";
+  const N = 6;
+  const FULL_DOMAIN = 0x1FF;
+
+  const POPCOUNT = new Int8Array(512);
+  for (let i = 0; i < 512; i++) {
+    let n = 0, x = i;
+    while (x) { n++; x &= x - 1; }
+    POPCOUNT[i] = n;
+  }
+
+  function shuffle(arr) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = a[i]; a[i] = a[j]; a[j] = t;
+    }
+    return a;
+  }
+  function sumOf(arr) { let s = 0; for (let i = 0; i < arr.length; i++) s += arr[i]; return s; }
+  function rowOf(grid, r) { return grid[r].slice(); }
+  function colOf(grid, c) { return grid.map(row => row[c]); }
+
+  function findDuplicate(vals) {
+    const counts = {};
+    for (const v of vals) counts[v] = (counts[v] || 0) + 1;
+    for (const k in counts) if (counts[k] === 2) return parseInt(k);
+    return null;
+  }
+  function isDirectSequence(vals) {
+    for (let i = 1; i < vals.length; i++) if (vals[i] !== vals[i-1] + 1) return false;
+    return true;
+  }
+  function isAscending(vals) {
+    for (let i = 1; i < vals.length; i++) if (vals[i] <= vals[i-1]) return false;
+    return true;
+  }
+  function isDescending(vals) {
+    for (let i = 1; i < vals.length; i++) if (vals[i] >= vals[i-1]) return false;
+    return true;
+  }
+  function atMostOneDoubled(arr) {
+    const counts = {};
+    for (const v of arr) counts[v] = (counts[v] || 0) + 1;
+    let doubled = 0;
+    for (const k in counts) {
+      if (counts[k] >= 3) return false;
+      if (counts[k] === 2) doubled++;
+    }
+    return doubled <= 1;
+  }
+  function gridQualityOK(grid) {
+    let dupLines = 0;
+    for (let r = 0; r < N; r++) {
+      const arr = rowOf(grid, r);
+      if (!atMostOneDoubled(arr)) return false;
+      if (findDuplicate(arr) !== null) dupLines++;
+    }
+    for (let c = 0; c < N; c++) {
+      const arr = colOf(grid, c);
+      if (!atMostOneDoubled(arr)) return false;
+      if (findDuplicate(arr) !== null) dupLines++;
+    }
+    return dupLines <= 5;
+  }
+
+  function decideSequences(numSequences) {
+    const result = [];
+    const used = new Set();
+    let attempts = 0;
+    while (result.length < numSequences && attempts++ < 200) {
+      const isRow = Math.random() < 0.5;
+      const lineIdx = Math.floor(Math.random() * N);
+      const key = (isRow ? "r" : "c") + lineIdx;
+      if (used.has(key)) continue;
+      used.add(key);
+      const roll = Math.random();
+      let type, values;
+      if (roll < 0.35) {
+        const k = 1 + Math.floor(Math.random() * 4);
+        values = [k, k+1, k+2, k+3, k+4, k+5];
+        type = "directSequence";
+      } else {
+        const all = [1,2,3,4,5,6,7,8,9];
+        for (let i = all.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          const t = all[i]; all[i] = all[j]; all[j] = t;
+        }
+        values = all.slice(0, 6).sort((a, b) => a - b);
+        if (roll >= 0.68) {
+          values.reverse();
+          type = "descending";
+        } else {
+          type = "ascending";
+        }
+      }
+      result.push({ isRow: isRow, lineIdx: lineIdx, type: type, values: values });
+    }
+    return result;
+  }
+
+  function applySequencesToGrid(grid, counts, sequences) {
+    for (const seq of sequences) {
+      for (let i = 0; i < N; i++) {
+        const r = seq.isRow ? seq.lineIdx : i;
+        const c = seq.isRow ? i : seq.lineIdx;
+        const v = seq.values[i];
+        const existing = grid[r][c];
+        if (existing !== 0) {
+          if (existing !== v) return false;
+          continue;
+        }
+        if (counts[v] >= 4) return false;
+        if (r > 0 && grid[r-1][c] === v) return false;
+        if (r < N-1 && grid[r+1][c] === v) return false;
+        if (c > 0 && grid[r][c-1] === v) return false;
+        if (c < N-1 && grid[r][c+1] === v) return false;
+        grid[r][c] = v;
+        counts[v]++;
+      }
+    }
+    return true;
+  }
+
+  function generateGrid(numSequences) {
+    const MAX_OUTER = 20;
+    const MAX_INNER = 8;
+    for (let outer = 0; outer < MAX_OUTER; outer++) {
+      const sequences = numSequences > 0 ? decideSequences(numSequences) : [];
+      for (let inner = 0; inner < MAX_INNER; inner++) {
+        const grid = Array.from({length: N}, () => Array(N).fill(0));
+        const counts = Array(10).fill(0);
+        if (!applySequencesToGrid(grid, counts, sequences)) break;
+        function fill(idx) {
+          if (idx === N*N) return true;
+          const r = (idx / N) | 0;
+          const c = idx % N;
+          if (grid[r][c] !== 0) return fill(idx + 1);
+          const cands = [];
+          for (let v = 1; v <= 9; v++) {
+            if (counts[v] >= 4) continue;
+            if (r > 0 && grid[r-1][c] === v) continue;
+            if (c > 0 && grid[r][c-1] === v) continue;
+            if (r < N-1 && grid[r+1][c] === v) continue;
+            if (c < N-1 && grid[r][c+1] === v) continue;
+            let rc = 0;
+            for (let cc = 0; cc < N; cc++) if (grid[r][cc] === v) rc++;
+            if (rc >= 2) continue;
+            let cc_ = 0;
+            for (let rr = 0; rr < N; rr++) if (grid[rr][c] === v) cc_++;
+            if (cc_ >= 2) continue;
+            cands.push({ v: v, s: rc + cc_ });
+          }
+          for (let i = cands.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            const t = cands[i]; cands[i] = cands[j]; cands[j] = t;
+          }
+          cands.sort((a, b) => a.s - b.s);
+          for (let k = 0; k < cands.length; k++) {
+            const v = cands[k].v;
+            grid[r][c] = v;
+            counts[v]++;
+            if (fill(idx + 1)) return true;
+            grid[r][c] = 0;
+            counts[v]--;
+          }
+          return false;
+        }
+        if (fill(0) && gridQualityOK(grid)) return grid;
+      }
+    }
+    return null;
+  }
+
+  function rowCandidates(grid, r) {
+    const vals = rowOf(grid, r);
+    const list = [];
+    const dup = findDuplicate(vals);
+    if (dup !== null) list.push({ type: "duplicate", scope: "row", index: r, value: dup, mandatory: true });
+    for (let c = 0; c < N - 1; c++) {
+      list.push({ type: "pairSum", cells: [[r,c],[r,c+1]], value: vals[c] + vals[c+1] });
+    }
+    list.push({ type: "totalSum", scope: "row", index: r, value: sumOf(vals) });
+    if (isDirectSequence(vals)) list.push({ type: "directSequence", scope: "row", index: r });
+    else if (isAscending(vals)) list.push({ type: "ascending", scope: "row", index: r });
+    else if (isDescending(vals)) list.push({ type: "descending", scope: "row", index: r });
+    return list;
+  }
+  function colCandidates(grid, c) {
+    const vals = colOf(grid, c);
+    const list = [];
+    const dup = findDuplicate(vals);
+    if (dup !== null) list.push({ type: "duplicate", scope: "col", index: c, value: dup, mandatory: true });
+    for (let r = 0; r < N - 1; r++) {
+      list.push({ type: "pairSum", cells: [[r,c],[r+1,c]], value: vals[r] + vals[r+1] });
+    }
+    list.push({ type: "totalSum", scope: "col", index: c, value: sumOf(vals) });
+    if (isDirectSequence(vals)) list.push({ type: "directSequence", scope: "col", index: c });
+    else if (isAscending(vals)) list.push({ type: "ascending", scope: "col", index: c });
+    else if (isDescending(vals)) list.push({ type: "descending", scope: "col", index: c });
+    return list;
+  }
+  function buildCandidateClues(grid) {
+    const rowCands = [], colCands = [];
+    for (let r = 0; r < N; r++) rowCands.push(rowCandidates(grid, r));
+    for (let c = 0; c < N; c++) colCands.push(colCandidates(grid, c));
+    return { rowCands, colCands };
+  }
+
+  function clueCells(clue) {
+    if (clue.type === "pairSum") return clue.cells.map(([r,c]) => r*N+c);
+    const cells = [];
+    if (clue.scope === "row") {
+      for (let c = 0; c < N; c++) cells.push(clue.index*N + c);
+    } else {
+      for (let r = 0; r < N; r++) cells.push(r*N + clue.index);
+    }
+    return cells;
+  }
+
+  function verifyClue(clue, grid) {
+    switch (clue.type) {
+      case "pairSum": {
+        const [[r1,c1],[r2,c2]] = clue.cells;
+        return grid[r1][c1] + grid[r2][c2] === clue.value;
+      }
+      case "totalSum": {
+        const vals = clue.scope === "row" ? rowOf(grid, clue.index) : colOf(grid, clue.index);
+        return sumOf(vals) === clue.value;
+      }
+      case "duplicate": {
+        const vals = clue.scope === "row" ? rowOf(grid, clue.index) : colOf(grid, clue.index);
+        let c = 0;
+        for (let i = 0; i < vals.length; i++) if (vals[i] === clue.value) c++;
+        return c === 2;
+      }
+      case "directSequence": {
+        const vals = clue.scope === "row" ? rowOf(grid, clue.index) : colOf(grid, clue.index);
+        return isDirectSequence(vals);
+      }
+      case "ascending": {
+        const vals = clue.scope === "row" ? rowOf(grid, clue.index) : colOf(grid, clue.index);
+        return isAscending(vals);
+      }
+      case "descending": {
+        const vals = clue.scope === "row" ? rowOf(grid, clue.index) : colOf(grid, clue.index);
+        return isDescending(vals);
+      }
+    }
+    return false;
+  }
+
+  // Optimized solver: bitmask domains, forward checking, MRV, pairSum propagation
+  function solve(selected, countLimit, nodeLimit) {
+    countLimit = countLimit || 2;
+    nodeLimit = nodeLimit || 600000;
+
+    const allClues = [];
+    const rowDupVals = new Map();
+    const colDupVals = new Map();
+    for (let r = 0; r < N; r++) for (const cl of selected.rowClues[r]) {
+      allClues.push(cl);
+      if (cl.type === "duplicate") {
+        if (!rowDupVals.has(r)) rowDupVals.set(r, new Set());
+        rowDupVals.get(r).add(cl.value);
+      }
+    }
+    for (let c = 0; c < N; c++) for (const cl of selected.colClues[c]) {
+      allClues.push(cl);
+      if (cl.type === "duplicate") {
+        if (!colDupVals.has(c)) colDupVals.set(c, new Set());
+        colDupVals.get(c).add(cl.value);
+      }
+    }
+
+    const clueCellsMap = new Map();
+    for (const cl of allClues) clueCellsMap.set(cl, clueCells(cl));
+
+    const cluesByCell = [];
+    for (let i = 0; i < N*N; i++) cluesByCell.push([]);
+    for (const cl of allClues) {
+      for (const idx of clueCellsMap.get(cl)) cluesByCell[idx].push(cl);
+    }
+
+    const domains = new Int32Array(N*N).fill(FULL_DOMAIN);
+    const assigned = new Uint8Array(N*N);
+    const grid = Array.from({length: N}, () => Array(N).fill(0));
+    const counts = new Int8Array(10);
+
+    let solutionCount = 0;
+    let firstSolution = null;
+    let nodes = 0;
+    let timedOut = false;
+
+    function removeBit(targetIdx, v, undo) {
+      if (assigned[targetIdx]) return true;
+      const bit = 1 << (v - 1);
+      if (domains[targetIdx] & bit) {
+        domains[targetIdx] &= ~bit;
+        undo.push((targetIdx << 4) | (v - 1));
+        if (domains[targetIdx] === 0) return false;
+      }
+      return true;
+    }
+
+    function forceDomain(targetIdx, mask, undo) {
+      if (assigned[targetIdx]) return true;
+      const cur = domains[targetIdx];
+      const toRemove = cur & ~mask;
+      if (!toRemove) return (cur & mask) !== 0;
+      for (let v = 1; v <= 9; v++) {
+        const b = 1 << (v - 1);
+        if (toRemove & b) {
+          domains[targetIdx] &= ~b;
+          undo.push((targetIdx << 4) | (v - 1));
+        }
+      }
+      return domains[targetIdx] !== 0;
+    }
+
+    function place(idx, v, undo) {
+      const r = (idx / N) | 0;
+      const c = idx % N;
+      grid[r][c] = v;
+      counts[v]++;
+      assigned[idx] = 1;
+
+      if (r > 0 && !removeBit((r-1)*N+c, v, undo)) return false;
+      if (r < N-1 && !removeBit((r+1)*N+c, v, undo)) return false;
+      if (c > 0 && !removeBit(r*N+c-1, v, undo)) return false;
+      if (c < N-1 && !removeBit(r*N+c+1, v, undo)) return false;
+
+      let rowCnt = 0;
+      for (let cc = 0; cc < N; cc++) if (grid[r][cc] === v) rowCnt++;
+      const rowDup = rowDupVals.get(r);
+      const rowMax = (rowDup && rowDup.has(v)) ? 2 : 1;
+      if (rowCnt >= rowMax) {
+        for (let cc = 0; cc < N; cc++) {
+          if (cc !== c && !removeBit(r*N+cc, v, undo)) return false;
+        }
+      }
+
+      let colCnt = 0;
+      for (let rr = 0; rr < N; rr++) if (grid[rr][c] === v) colCnt++;
+      const colDup = colDupVals.get(c);
+      const colMax = (colDup && colDup.has(v)) ? 2 : 1;
+      if (colCnt >= colMax) {
+        for (let rr = 0; rr < N; rr++) {
+          if (rr !== r && !removeBit(rr*N+c, v, undo)) return false;
+        }
+      }
+
+      if (counts[v] >= 4) {
+        for (let i = 0; i < N*N; i++) {
+          if (i !== idx && !removeBit(i, v, undo)) return false;
+        }
+      }
+
+      const cluesHere = cluesByCell[idx];
+      for (let k = 0; k < cluesHere.length; k++) {
+        const cl = cluesHere[k];
+        const cells = clueCellsMap.get(cl);
+        if (cl.type === "pairSum") {
+          const otherIdx = cells[0] === idx ? cells[1] : cells[0];
+          const otherR = (otherIdx / N) | 0;
+          const otherC = otherIdx % N;
+          if (assigned[otherIdx]) {
+            if (grid[otherR][otherC] + v !== cl.value) return false;
+          } else {
+            const needed = cl.value - v;
+            if (needed < 1 || needed > 9) return false;
+            const mask = 1 << (needed - 1);
+            if (!forceDomain(otherIdx, mask, undo)) return false;
+          }
+        } else {
+          let allFilled = true;
+          for (let m = 0; m < cells.length; m++) {
+            if (!assigned[cells[m]]) { allFilled = false; break; }
+          }
+          if (allFilled && !verifyClue(cl, grid)) return false;
+        }
+      }
+
+      return true;
+    }
+
+    function unplace(idx, v, undo) {
+      const r = (idx / N) | 0;
+      const c = idx % N;
+      grid[r][c] = 0;
+      counts[v]--;
+      assigned[idx] = 0;
+      for (let i = undo.length - 1; i >= 0; i--) {
+        const packed = undo[i];
+        const cellIdx = packed >> 4;
+        const bitIdx = packed & 0xF;
+        domains[cellIdx] |= (1 << bitIdx);
+      }
+    }
+
+    function pickCellMRV() {
+      let best = -1;
+      let bestSize = 100;
+      for (let i = 0; i < N*N; i++) {
+        if (assigned[i]) continue;
+        const sz = POPCOUNT[domains[i]];
+        if (sz < bestSize) {
+          bestSize = sz;
+          best = i;
+          if (sz <= 1) return i;
+        }
+      }
+      return best;
+    }
+
+    function fillBT() {
+      if (timedOut || solutionCount >= countLimit) return;
+      nodes++;
+      if (nodes > nodeLimit) { timedOut = true; return; }
+
+      const idx = pickCellMRV();
+      if (idx === -1) {
+        for (let k = 0; k < allClues.length; k++) if (!verifyClue(allClues[k], grid)) return;
+        solutionCount++;
+        if (!firstSolution) firstSolution = grid.map(row => row.slice());
+        return;
+      }
+
+      const d = domains[idx];
+      for (let v = 1; v <= 9; v++) {
+        if (!(d & (1 << (v-1)))) continue;
+        const undo = [];
+        if (place(idx, v, undo)) fillBT();
+        unplace(idx, v, undo);
+        if (timedOut || solutionCount >= countLimit) return;
+      }
+    }
+
+    fillBT();
+    return { count: solutionCount, solution: firstSolution, timedOut };
+  }
+
+  function emptyClueSet() {
+    const r = [], c = [];
+    for (let i = 0; i < N; i++) { r.push([]); c.push([]); }
+    return { rowClues: r, colClues: c };
+  }
+  function typePriority(t) {
+    const m = { directSequence: 0, ascending: 1, descending: 1, totalSum: 2, pairSum: 3 };
+    return t in m ? m[t] : 9;
+  }
+
+  function pickClues(grid, cfg) {
+    const cands = buildCandidateClues(grid);
+    const MAX_TOTAL_SUMS = 5;
+    function isSeqType(t) { return t === "directSequence" || t === "ascending" || t === "descending"; }
+
+    // Start with ALL candidate clues — heavily constrained, so the solver is very fast
+    const selected = emptyClueSet();
+    for (let r = 0; r < N; r++) for (const cl of cands.rowCands[r]) selected.rowClues[r].push(cl);
+    for (let c = 0; c < N; c++) for (const cl of cands.colCands[c]) selected.colClues[c].push(cl);
+
+    // Sanity check
+    const initial = solve(selected, 2, 100000);
+    if (initial.timedOut || initial.count !== 1) return null;
+
+    function removeScore(cl) {
+      if (cl.mandatory) return -1;
+      if (cl.type === "pairSum") return 3;
+      if (cl.type === "totalSum") return 2;
+      // sequences kept if possible
+      return 1;
+    }
+
+    // Cap-enforcement only: remove clues from over-cap lines, never below cap.
+    // This keeps the puzzle "well-constrained" — solver stays fast (forward + pairSum propagation effective).
+    let pass = 0;
+    while (pass++ < 10) {
+      const overLines = [];
+      for (let r = 0; r < N; r++) if (selected.rowClues[r].length > cfg.maxPerLine) overLines.push({ kind: "row", i: r });
+      for (let c = 0; c < N; c++) if (selected.colClues[c].length > cfg.maxPerLine) overLines.push({ kind: "col", i: c });
+      if (!overLines.length) break;
+
+      // Randomize order
+      for (let i = overLines.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const t = overLines[i]; overLines[i] = overLines[j]; overLines[j] = t;
+      }
+
+      let removedAny = false;
+      for (const oc of overLines) {
+        const list = oc.kind === "row" ? selected.rowClues[oc.i] : selected.colClues[oc.i];
+        if (list.length <= cfg.maxPerLine) continue;
+        // Build removable candidates, shuffled, then sorted (low-info first)
+        const removable = list.filter(c => !c.mandatory).slice();
+        for (let i = removable.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          const t = removable[i]; removable[i] = removable[j]; removable[j] = t;
+        }
+        removable.sort((a, b) => removeScore(b) - removeScore(a));
+
+        for (const cand of removable) {
+          if (list.length <= cfg.maxPerLine) break;
+          const idx = list.indexOf(cand);
+          if (idx < 0) continue;
+          list.splice(idx, 1);
+          const r = solve(selected, 2, 60000);
+          if (r.timedOut || r.count !== 1) {
+            list.splice(idx, 0, cand);
+          } else {
+            removedAny = true;
+          }
+        }
+      }
+      if (!removedAny) break;
+    }
+
+    // Final per-line cap check
+    for (let r = 0; r < N; r++) if (selected.rowClues[r].length > cfg.maxPerLine) return null;
+    for (let c = 0; c < N; c++) if (selected.colClues[c].length > cfg.maxPerLine) return null;
+
+    // Enforce totalSum global cap (≤ MAX_TOTAL_SUMS)
+    let tsCount = 0;
+    for (const cs of selected.rowClues) for (const cl of cs) if (cl.type === "totalSum") tsCount++;
+    for (const cs of selected.colClues) for (const cl of cs) if (cl.type === "totalSum") tsCount++;
+    while (tsCount > MAX_TOTAL_SUMS) {
+      const tsCands = [];
+      for (let r = 0; r < N; r++) for (const cl of selected.rowClues[r]) if (cl.type === "totalSum") tsCands.push({ kind: "row", i: r, clue: cl });
+      for (let c = 0; c < N; c++) for (const cl of selected.colClues[c]) if (cl.type === "totalSum") tsCands.push({ kind: "col", i: c, clue: cl });
+      for (let i = tsCands.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const t = tsCands[i]; tsCands[i] = tsCands[j]; tsCands[j] = t;
+      }
+      let didRemove = false;
+      for (const cand of tsCands) {
+        const list = cand.kind === "row" ? selected.rowClues[cand.i] : selected.colClues[cand.i];
+        const idx = list.indexOf(cand.clue);
+        if (idx < 0) continue;
+        list.splice(idx, 1);
+        const r = solve(selected, 2, 60000);
+        if (r.timedOut || r.count !== 1) {
+          list.splice(idx, 0, cand.clue);
+        } else {
+          tsCount--;
+          didRemove = true;
+          break;
+        }
+      }
+      if (!didRemove) return null;
+    }
+
+    // Enforce sequence-locks-line: try to remove non-sequence non-mandatory clues from lines that contain a sequence
+    if (cfg.lockSequence) {
+      function tryLockLine(list) {
+        const removable = list.filter(cl => !cl.mandatory && !isSeqType(cl.type));
+        for (const cand of removable) {
+          const idx = list.indexOf(cand);
+          if (idx < 0) continue;
+          list.splice(idx, 1);
+          const r = solve(selected, 2, 60000);
+          if (r.timedOut || r.count !== 1) {
+            list.splice(idx, 0, cand);
+          } else if (list.find(cl => cl.type === "totalSum")) {
+            // totalSum count may have changed — recompute on next iteration
+          }
+        }
+      }
+      for (let r = 0; r < N; r++) {
+        if (selected.rowClues[r].some(cl => isSeqType(cl.type))) tryLockLine(selected.rowClues[r]);
+      }
+      for (let c = 0; c < N; c++) {
+        if (selected.colClues[c].some(cl => isSeqType(cl.type))) tryLockLine(selected.colClues[c]);
+      }
+    }
+
+    return selected;
+  }
+
+  const DIFFICULTY_CONFIG = {
+    easy:   { numSequences: 3, maxPerLine: 3, lockSequence: false },
+    medium: { numSequences: 2, maxPerLine: 2, lockSequence: true },
+    hard:   { numSequences: 1, maxPerLine: 2, lockSequence: true },
+  };
+
+  self.onmessage = function(e) {
+    const difficulty = e.data.difficulty;
+    const cfg = DIFFICULTY_CONFIG[difficulty] || DIFFICULTY_CONFIG.medium;
+    const maxAttempts = e.data.maxAttempts;
+    let progressBatch = 0;
+    const BATCH = 3;
+    for (let attempts = 0; attempts < maxAttempts; attempts++) {
+      progressBatch++;
+      const grid = generateGrid(cfg.numSequences);
+      if (grid) {
+        const clues = pickClues(grid, cfg);
+        if (clues) {
+          self.postMessage({ type: "progress", delta: progressBatch });
+          self.postMessage({ type: "result", grid: grid, clues: clues });
+          return;
+        }
+      }
+      if (progressBatch >= BATCH) {
+        self.postMessage({ type: "progress", delta: progressBatch });
+        progressBatch = 0;
+      }
+    }
+    if (progressBatch > 0) self.postMessage({ type: "progress", delta: progressBatch });
+    self.postMessage({ type: "result", grid: null });
+  };
+}
+
+// === Main-thread: worker management + UI ===
+const WORKER_SRC = `(${workerCode.toString()})();`;
+let workerBlobUrl = null;
+function getWorkerUrl() {
+  if (!workerBlobUrl) {
+    const blob = new Blob([WORKER_SRC], { type: "application/javascript" });
+    workerBlobUrl = URL.createObjectURL(blob);
+  }
+  return workerBlobUrl;
+}
+
+let currentPuzzle = null;
+let activeWorkers = [];
+
+async function generate() {
+  const btn = document.getElementById("generate-btn");
+  const printBtn = document.getElementById("print-btn");
+  const progress = document.getElementById("progress");
+  const status = document.getElementById("status");
+  const errorEl = document.getElementById("error");
+  const progressBar = document.getElementById("progress-bar");
+
+  activeWorkers.forEach(w => { try { w.terminate(); } catch(_){} });
+  activeWorkers = [];
+
+  btn.disabled = true;
+  printBtn.disabled = true;
+  progress.hidden = false;
+  errorEl.textContent = "";
+
+  const difficulty = document.querySelector('input[name="difficulty"]:checked').value;
+  const NUM_WORKERS = Math.max(1, Math.min(navigator.hardwareConcurrency || 2, 4));
+  const PER_WORKER = 400;
+  const TOTAL_MAX = NUM_WORKERS * PER_WORKER;
+
+  progressBar.max = TOTAL_MAX;
+  progressBar.value = 0;
+  status.textContent = `Suche nach einem eindeutigen Rätsel … (${NUM_WORKERS} parallele Threads)`;
+
+  const url = getWorkerUrl();
+
+  const result = await new Promise((resolve) => {
+    let resolved = false;
+    let completed = 0;
+    let totalProgress = 0;
+
+    for (let i = 0; i < NUM_WORKERS; i++) {
+      let w;
+      try { w = new Worker(url); }
+      catch (err) {
+        console.error("Worker konnte nicht gestartet werden:", err);
+        completed++;
+        if (completed === NUM_WORKERS && !resolved) { resolved = true; resolve(null); }
+        continue;
+      }
+      activeWorkers.push(w);
+      w.onmessage = (e) => {
+        if (resolved) return;
+        if (e.data.type === "progress") {
+          totalProgress += e.data.delta;
+          progressBar.value = Math.min(totalProgress, TOTAL_MAX);
+        } else if (e.data.type === "result") {
+          if (e.data.grid) {
+            resolved = true;
+            resolve({ grid: e.data.grid, clues: e.data.clues });
+          } else {
+            completed++;
+            if (completed === NUM_WORKERS) { resolved = true; resolve(null); }
+          }
+        }
+      };
+      w.onerror = (err) => {
+        console.error("Worker error:", err);
+        if (!resolved) {
+          completed++;
+          if (completed === NUM_WORKERS) { resolved = true; resolve(null); }
+        }
+      };
+      w.postMessage({ difficulty: difficulty, maxAttempts: PER_WORKER });
+    }
+  });
+
+  activeWorkers.forEach(w => { try { w.terminate(); } catch(_){} });
+  activeWorkers = [];
+
+  if (!result) {
+    status.textContent = "";
+    progress.hidden = true;
+    btn.disabled = false;
+    errorEl.textContent = `Kein eindeutiges Rätsel gefunden. Bitte „Neues Rätsel" erneut versuchen.`;
+    return;
+  }
+
+  const code = encodeGrid(result.grid);
+  currentPuzzle = { grid: result.grid, clues: result.clues, code };
+  renderPuzzle(currentPuzzle);
+  progress.hidden = true;
+  btn.disabled = false;
+  printBtn.disabled = false;
+}
+
+function buildGridTable() {
+  const tbl = document.getElementById("grid");
+  tbl.innerHTML = "";
+  const header = document.createElement("tr");
+  header.appendChild(document.createElement("th"));
+  for (let c = 0; c < N; c++) {
+    const th = document.createElement("th");
+    th.textContent = COL_LABELS[c];
+    header.appendChild(th);
+  }
+  tbl.appendChild(header);
+  for (let r = 0; r < N; r++) {
+    const tr = document.createElement("tr");
+    const th = document.createElement("th");
+    th.textContent = ROW_LABELS[r];
+    tr.appendChild(th);
+    for (let c = 0; c < N; c++) {
+      const td = document.createElement("td");
+      td.dataset.r = r;
+      td.dataset.c = c;
+      tr.appendChild(td);
+    }
+    tbl.appendChild(tr);
+  }
+}
+
+function ensureGridTable() {
+  const tbl = document.getElementById("grid");
+  if (!tbl.children.length) buildGridTable();
+}
+
+function renderPuzzle(p) {
+  document.getElementById("puzzle").hidden = false;
+  document.getElementById("hints-block").hidden = false;
+  document.getElementById("code-block").hidden = false;
+
+  const rowHints = document.getElementById("row-hints");
+  rowHints.innerHTML = "";
+  for (let r = 0; r < N; r++) {
+    const li = document.createElement("li");
+    const cs = p.clues.rowClues[r];
+    li.innerHTML = `<span class="label">${ROW_LABELS[r]}:</span> ${cs.length ? cs.map(clueText).join(" ") : "<em>(keine Hinweise)</em>"}`;
+    rowHints.appendChild(li);
+  }
+  const colHints = document.getElementById("col-hints");
+  colHints.innerHTML = "";
+  for (let c = 0; c < N; c++) {
+    const li = document.createElement("li");
+    const cs = p.clues.colClues[c];
+    li.innerHTML = `<span class="label">${COL_LABELS[c]}:</span> ${cs.length ? cs.map(clueText).join(" ") : "<em>(keine Hinweise)</em>"}`;
+    colHints.appendChild(li);
+  }
+
+  buildGridTable();
+  document.getElementById("code").textContent = p.code;
+  document.getElementById("code-input").value = "";
+  document.getElementById("error").textContent = "";
+  clearGridCells();
+}
+
+function showSolution(grid) {
+  ensureGridTable();
+  document.getElementById("puzzle").hidden = false;
+  document.getElementById("hints-block").hidden = !currentPuzzle;
+  document.getElementById("code-block").hidden = !currentPuzzle;
+  const cells = document.getElementById("grid").querySelectorAll("td");
+  for (const td of cells) {
+    td.textContent = grid[+td.dataset.r][+td.dataset.c];
+  }
+}
+function clearGridCells() {
+  const cells = document.getElementById("grid").querySelectorAll("td");
+  for (const td of cells) td.textContent = "";
+}
+function hideSolution() {
+  clearGridCells();
+  if (!currentPuzzle) {
+    document.getElementById("puzzle").hidden = true;
+  }
+}
+
+document.getElementById("generate-btn").addEventListener("click", generate);
+document.getElementById("reveal-btn").addEventListener("click", () => {
+  const code = document.getElementById("code-input").value;
+  const grid = decodeCode(code);
+  const err = document.getElementById("error");
+  if (!grid) { err.textContent = "Code ungültig."; return; }
+  err.textContent = "";
+  showSolution(grid);
+});
+document.getElementById("hide-btn").addEventListener("click", () => {
+  hideSolution();
+  document.getElementById("error").textContent = "";
+});
+document.getElementById("print-btn").addEventListener("click", () => window.print());
+</script>
+</body>
+</html>
