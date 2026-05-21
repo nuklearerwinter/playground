@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>STL Viewer</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #1a1a1d;
+      --panel: #26262b;
+      --text: #e8e8ea;
+      --muted: #9a9aa2;
+      --accent: #4ea1ff;
+    }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+                 font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    #app { position: fixed; inset: 0; }
+    canvas { display: block; }
+
+    #drop-hint {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      pointer-events: none; font-size: 1.1rem; color: var(--muted); text-align: center;
+    }
+    #drop-hint.hidden { display: none; }
+    #drop-hint strong { color: var(--text); }
+
+    #drop-overlay {
+      position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+      background: rgba(78, 161, 255, 0.12); border: 3px dashed var(--accent);
+      color: var(--accent); font-size: 1.3rem; pointer-events: none; z-index: 10;
+    }
+    #drop-overlay.active { display: flex; }
+
+    #toolbar {
+      position: absolute; top: 12px; left: 12px; display: flex; gap: 8px; align-items: center;
+      background: var(--panel); padding: 8px 10px; border-radius: 8px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.3); z-index: 5;
+    }
+    #toolbar button, #toolbar label {
+      background: transparent; color: var(--text); border: 1px solid #3a3a42;
+      padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 0.9rem;
+    }
+    #toolbar button:hover, #toolbar label:hover { border-color: var(--accent); color: var(--accent); }
+    #toolbar input[type="file"] { display: none; }
+
+    #info {
+      position: absolute; bottom: 12px; left: 12px; background: var(--panel);
+      padding: 8px 12px; border-radius: 8px; font-size: 0.85rem; color: var(--muted);
+      z-index: 5; font-variant-numeric: tabular-nums;
+    }
+    #info.hidden { display: none; }
+    #info .label { color: var(--muted); }
+    #info .value { color: var(--text); }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <div id="toolbar">
+    <label for="file-input">Datei öffnen</label>
+    <input id="file-input" type="file" accept=".stl" />
+    <button id="reset-view" title="Ansicht zurücksetzen">Ansicht zurücksetzen</button>
+  </div>
+
+  <div id="drop-hint">
+    <div>
+      <div style="font-size: 2rem; margin-bottom: 0.5rem;">STL Viewer</div>
+      <div>Zieh eine <strong>.stl</strong>-Datei hierher oder klick oben auf <strong>Datei öffnen</strong>.</div>
+    </div>
+  </div>
+
+  <div id="drop-overlay">Loslassen, um zu öffnen …</div>
+
+  <div id="info" class="hidden">
+    <span class="label">Datei:</span> <span id="info-name" class="value">—</span> &nbsp;
+    <span class="label">Dreiecke:</span> <span id="info-tris" class="value">—</span> &nbsp;
+    <span class="label">Größe (X×Y×Z mm):</span> <span id="info-size" class="value">—</span>
+  </div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.162.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.162.0/examples/jsm/"
+      }
+    }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { STLLoader }     from 'three/addons/loaders/STLLoader.js';
+
+    const container = document.getElementById('app');
+    const dropHint  = document.getElementById('drop-hint');
+    const dropOv    = document.getElementById('drop-overlay');
+    const fileInput = document.getElementById('file-input');
+    const resetBtn  = document.getElementById('reset-view');
+    const infoBox   = document.getElementById('info');
+    const infoName  = document.getElementById('info-name');
+    const infoTris  = document.getElementById('info-tris');
+    const infoSize  = document.getElementById('info-size');
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x1a1a1d);
+
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 10000);
+    camera.position.set(100, 100, 100);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    container.appendChild(renderer.domElement);
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.45));
+    const key = new THREE.DirectionalLight(0xffffff, 0.9); key.position.set(1, 1, 1);   scene.add(key);
+    const fill = new THREE.DirectionalLight(0xffffff, 0.4); fill.position.set(-1, 0.5, -1); scene.add(fill);
+
+    const grid = new THREE.GridHelper(400, 40, 0x444444, 0x2a2a2a);
+    scene.add(grid);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+
+    const loader = new STLLoader();
+    let currentMesh = null;
+    let homeCam = { pos: camera.position.clone(), target: new THREE.Vector3() };
+
+    function loadSTLFromArrayBuffer(buffer, filename) {
+      let geometry;
+      try {
+        geometry = loader.parse(buffer);
+      } catch (e) {
+        alert('Konnte STL-Datei nicht lesen: ' + e.message);
+        return;
+      }
+      geometry.computeVertexNormals();
+      geometry.center();
+
+      if (currentMesh) {
+        scene.remove(currentMesh);
+        currentMesh.geometry.dispose();
+        currentMesh.material.dispose();
+      }
+
+      const material = new THREE.MeshStandardMaterial({
+        color: 0x8ab4ff, metalness: 0.1, roughness: 0.6, flatShading: false,
+      });
+      currentMesh = new THREE.Mesh(geometry, material);
+      currentMesh.rotation.x = -Math.PI / 2; // STL: Z-up → Three.js: Y-up
+      scene.add(currentMesh);
+
+      frameObject(currentMesh);
+
+      const tris = (geometry.index ? geometry.index.count : geometry.attributes.position.count) / 3;
+      const box = new THREE.Box3().setFromObject(currentMesh);
+      const size = new THREE.Vector3(); box.getSize(size);
+      infoName.textContent = filename;
+      infoTris.textContent = tris.toLocaleString('de-DE');
+      infoSize.textContent = `${size.x.toFixed(1)} × ${size.y.toFixed(1)} × ${size.z.toFixed(1)}`;
+      infoBox.classList.remove('hidden');
+      dropHint.classList.add('hidden');
+    }
+
+    function frameObject(obj) {
+      const box = new THREE.Box3().setFromObject(obj);
+      const size = new THREE.Vector3(); box.getSize(size);
+      const center = new THREE.Vector3(); box.getCenter(center);
+      const maxDim = Math.max(size.x, size.y, size.z) || 1;
+      const fov = camera.fov * Math.PI / 180;
+      const dist = (maxDim / 2) / Math.tan(fov / 2) * 1.8;
+
+      const dir = new THREE.Vector3(1, 0.8, 1).normalize();
+      camera.position.copy(center).addScaledVector(dir, dist);
+      camera.near = Math.max(0.1, dist / 100);
+      camera.far  = dist * 100;
+      camera.updateProjectionMatrix();
+      controls.target.copy(center);
+      controls.update();
+
+      homeCam = { pos: camera.position.clone(), target: center.clone() };
+    }
+
+    function openFile(file) {
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = e => loadSTLFromArrayBuffer(e.target.result, file.name);
+      reader.onerror = () => alert('Datei konnte nicht gelesen werden.');
+      reader.readAsArrayBuffer(file);
+    }
+
+    fileInput.addEventListener('change', e => openFile(e.target.files[0]));
+
+    resetBtn.addEventListener('click', () => {
+      camera.position.copy(homeCam.pos);
+      controls.target.copy(homeCam.target);
+      controls.update();
+    });
+
+    let dragDepth = 0;
+    window.addEventListener('dragenter', e => { e.preventDefault(); dragDepth++; dropOv.classList.add('active'); });
+    window.addEventListener('dragleave', e => { e.preventDefault(); if (--dragDepth <= 0) { dragDepth = 0; dropOv.classList.remove('active'); } });
+    window.addEventListener('dragover',  e => e.preventDefault());
+    window.addEventListener('drop', e => {
+      e.preventDefault(); dragDepth = 0; dropOv.classList.remove('active');
+      const file = e.dataTransfer?.files?.[0];
+      if (file && /\.stl$/i.test(file.name)) openFile(file);
+      else if (file) alert('Bitte eine .stl-Datei ablegen.');
+    });
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    (function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    })();
+  </script>
+</body>
+</html>
