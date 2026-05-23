@@ -43,8 +43,9 @@
   .footer { text-align: right; color: #888; font-size: 0.9em; font-style: italic; margin-top: 1em; }
 
   @media print {
-    body { max-width: none; margin: 0; padding: 0.5cm; font-size: 11pt; }
+    body { max-width: none; margin: 0; padding: 0.5cm; font-size: 11pt; position: relative; }
     .controls, .reveal, #error, #progress, header > details { display: none !important; }
+    header { padding-right: 2.6cm; }
     h1 { font-size: 14pt; margin: 0 0 0.2cm; }
     .intro { font-size: 9.5pt; margin: 0 0 0.3cm; color: #333; line-height: 1.3; }
     table#grid { margin: 0.6cm auto; }
@@ -53,10 +54,11 @@
     .difficulty-display { font-size: 10pt; margin: 0.1cm 0; }
     .hints h3 { font-size: 11pt; margin: 0.15cm 0; }
     .hints li { margin: 0.04cm 0; line-height: 1.25; }
-    .solution-code { background: none; padding: 0; font-size: 9pt; word-break: break-all; display: flex; align-items: center; gap: 0.4cm; flex-wrap: nowrap; justify-content: space-between; }
-    .solution-code .code-text { flex: 1 1 auto; text-align: left; min-width: 0; }
+    .solution-code { background: none; padding: 0; font-size: 9pt; word-break: break-all; display: block; }
+    .solution-code .code-text { text-align: left; }
     .solution-code small { display: none; }
-    .solution-code .qr-wrap svg { width: 2.5cm; height: 2.5cm; padding: 0; background: white; }
+    .solution-code .qr-wrap { position: absolute; top: 0; right: 0; }
+    .solution-code .qr-wrap svg { width: 2.4cm; height: 2.4cm; padding: 0; background: white; }
     .footer { display: none; }
     @page { size: A4 portrait; margin: 1.2cm; }
   }
