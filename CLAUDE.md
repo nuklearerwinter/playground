@@ -56,7 +56,7 @@ Architectural points that are non-obvious from the code:
 
 ## Other apps
 
-- `index.html` — STL viewer (3D model display).
+- `stlviewer.html` — STL viewer (3D model display).
 - `pacman.html` — Pacman browser game.
 
 Neither has interesting cross-cutting structure. Treat them as independent.
