@@ -2,6 +2,7 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Logicals Rätselgenerator</title>
 <style>
   :root { --accent: #1a8c8c; }
@@ -21,10 +22,11 @@
   button { padding: 0.55em 1.1em; font-size: 1em; cursor: pointer; margin: 0.2em 0.2em; border-radius: 4px; border: 1.5px solid var(--accent); background: white; color: var(--accent); font-family: inherit; }
   button:hover:not(:disabled) { background: var(--accent); color: white; }
   button:disabled { opacity: 0.5; cursor: progress; }
-  #progress { display: flex; align-items: center; gap: 0.7em; margin-top: 0.7em; color: #555; }
+  #progress { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4em 0.7em; margin-top: 0.7em; color: #555; }
   #progress[hidden] { display: none; }
+  #progress span { font-size: 0.9em; }
   #puzzle[hidden] { display: none; }
-  #progress-bar { width: 220px; height: 0.9em; appearance: none; -webkit-appearance: none; border: 1px solid #bbb; border-radius: 4px; overflow: hidden; background: #eee; }
+  #progress-bar { width: min(220px, 100%); height: 0.9em; appearance: none; -webkit-appearance: none; border: 1px solid #bbb; border-radius: 4px; overflow: hidden; background: #eee; }
   #progress-bar::-webkit-progress-bar { background: #eee; }
   #progress-bar::-webkit-progress-value { background: var(--accent); transition: width 0.08s linear; }
   #progress-bar::-moz-progress-bar { background: var(--accent); }
@@ -32,21 +34,33 @@
   .hints ol { list-style: none; padding-left: 0.2em; margin: 0 0 0.6em; }
   .hints li { margin: 0.2em 0; line-height: 1.45; }
   .hints .label { display: inline-block; min-width: 1.8em; font-weight: bold; color: var(--accent); }
-  table#grid { border-collapse: collapse; margin: 1.4em auto 1em; }
-  table#grid th { width: 2.6em; height: 2.6em; font-size: 1.6em; color: var(--accent); font-family: Georgia, serif; font-weight: bold; }
-  table#grid td { width: 2.6em; height: 2.6em; border: 1.5px solid #222; text-align: center; font-size: 1.6em; vertical-align: middle; background: white; font-family: Georgia, serif; }
+  /* Responsive grid: cells scale with the viewport (so 7 columns always fit a
+     phone) but cap near the original desktop size; the font follows the cell. */
+  table#grid { --cell: clamp(32px, 11.5vw, 64px); border-collapse: collapse; margin: 1.2em auto 1em; }
+  table#grid th { width: var(--cell); height: var(--cell); font-size: calc(var(--cell) * 0.42); color: var(--accent); font-family: Georgia, serif; font-weight: bold; }
+  table#grid td { width: var(--cell); height: var(--cell); border: 1.5px solid #222; text-align: center; font-size: calc(var(--cell) * 0.42); vertical-align: middle; background: white; font-family: Georgia, serif; }
   .difficulty-display { font-size: 1em; color: #444; margin: 0.4em 0 0.2em; font-style: italic; }
   .difficulty-display span { font-style: normal; font-weight: bold; color: var(--accent); }
   .solution-code { font-family: "Courier New", monospace; background: #f7f7f7; padding: 0.7em 0.9em; border-radius: 4px; margin: 0.8em 0; word-break: break-all; display: flex; align-items: center; gap: 1em; flex-wrap: wrap; justify-content: center; }
-  .solution-code .code-text { flex: 1 1 60%; min-width: 220px; text-align: center; }
+  .solution-code .code-text { flex: 1 1 220px; min-width: 0; text-align: center; }
   .solution-code .code-value { font-size: 1.05em; letter-spacing: 0.04em; font-weight: bold; color: #333; }
   .solution-code small { display: block; color: #666; margin-top: 0.3em; font-family: Georgia, serif; }
   .solution-code .qr-wrap { flex: 0 0 auto; }
   .solution-code .qr-wrap svg { display: block; width: 130px; height: 130px; background: white; padding: 4px; border-radius: 3px; }
   .reveal { display: flex; gap: 0.4em; flex-wrap: wrap; align-items: center; margin: 1em 0; }
-  .reveal input { padding: 0.55em 0.6em; font-family: "Courier New", monospace; flex: 1; min-width: 220px; border: 1px solid #bbb; border-radius: 4px; font-size: 1em; }
+  .reveal input { padding: 0.55em 0.6em; font-family: "Courier New", monospace; flex: 1 1 12em; min-width: 0; border: 1px solid #bbb; border-radius: 4px; font-size: 1em; }
   #error { color: #c33; min-height: 1.2em; margin: 0.3em 0; font-style: italic; }
   .footer { text-align: right; color: #888; font-size: 0.9em; font-style: italic; margin-top: 1em; }
+
+  /* Phones / narrow viewports: tighter spacing, bigger tap targets. */
+  @media (max-width: 600px) {
+    body { padding: 0 0.7em; margin: 0.6em auto; }
+    h1 { font-size: 1.5em; }
+    .intro { font-size: 0.9em; }
+    .controls { padding: 0.8em 0.9em; }
+    button { padding: 0.65em 1em; margin: 0.25em 0.25em 0.25em 0; }
+    .hints h3 { font-size: 1em; }
+  }
 
   @media print {
     body { max-width: none; margin: 0; padding: 0.5cm; font-size: 11pt; position: relative; }
