@@ -65,66 +65,77 @@ Datei-Funktionen: `decideSequences`, `applySequencesToGrid`, `generateGrid`.
 Wenn der Generator nach 20 × 8 Sequenz/Backtracking-Versuchen kein gültiges
 Gitter findet, gibt er `null` zurück; der Worker geht zum nächsten Versuch.
 
-## Hinweis-Auswahl (REDUCE-Strategie)
+## Akzeptanzkriterium: deduzierbar, nicht nur eindeutig
+
+Der entscheidende Punkt: ein Rätsel mit **eindeutiger** Lösung ist nicht
+automatisch **deduzierbar**. Eindeutigkeit heißt nur „es existiert genau eine
+Lösung" — die kann trotzdem nur per Raten/Backtracking auffindbar sein. Ein
+Mensch, der alle Hinweise und Default-Regeln ausgereizt hat und nicht
+weiterkommt, sitzt vor einem solchen Rätsel.
+
+Deshalb akzeptiert der Generator ein Rätsel nur, wenn es der **reine
+Propagations-Solver** `logicalSolve` vollständig löst — also ohne jede
+Fallunterscheidung. Weil jede Elimination von `logicalSolve` in *jeder* Lösung
+gültig ist, ist eine vollständig bestimmte Lösung zugleich der **Beweis der
+Eindeutigkeit**. `logicalSolve` ist damit die einzige Prüfinstanz; ein
+separater Backtracking-Solver wird nicht mehr gebraucht (und wäre im
+hinweisarmen Regime ohnehin unzuverlässig — er lief dort in Timeouts).
+
+## Solver (`logicalSolve`)
+
+Funktion: `logicalSolve(selected)`. Reiner Constraint-Propagations-Solver:
+er wendet ausschließlich **sichere Deduktionen** bis zum Fixpunkt an und
+**rät nie**. Domains sind Bitmasken (`Int32Array`, Bits 0–8 = Werte 1–9).
+Pro Durchlauf werden angewandt:
+
+- **Naked Singles + Adjazenz**: Eine fix bestimmte Zelle verbietet ihren
+  Wert in den vier H/V-Nachbarn.
+- **Zeilen-/Spalten-Distinktheit**: Pro Reihe/Spalte gilt jeder Wert höchstens
+  einmal (Obergrenze). Eine **untere** Schranke gibt es pro Linie nur für den
+  Dopplungs-Wert (genau zweimal) — daraus folgt für ihn auch ein „Hidden
+  Single". Achtung: Eine 6er-Linie enthält nur 6 der 9 Werte, es gibt also
+  **keine** Sudoku-artige „jeder Wert kommt vor"-Schranke.
+- **Globale Anzahl**: Jeder Wert kommt genau 4× im Gitter vor (Ober- und
+  Unterschranke über alle 36 Zellen).
+- **pairSum-Bogenkonsistenz**: Für `A + B = s` behält jede der beiden Zellen
+  nur Werte, zu denen der Partner einen passenden Komplementärwert hat.
+- **totalSum-Schrankenpropagation**: Pro Linie mit bekannter Gesamtsumme
+  werden Zellwerte über Min/Max-Summen der übrigen Zellen eingegrenzt.
+- **Sequenzen**: directSequence propagiert `Zelle[k+1] = Zelle[k] + 1`
+  (per Bit-Shift), ascending/descending propagieren die Monotonie-Schranken
+  entlang der Linie.
+
+`logicalSolve` liefert `{ solved, grid }`. `solved === true` bedeutet: alle
+36 Zellen sind auf genau einen Wert bestimmt — Rätsel deduzierbar **und**
+eindeutig. Eine leergelaufene Domain (`bad`) heißt Widerspruch → `false`.
+
+## Hinweis-Auswahl (REDUCE + Rebalance)
 
 Funktion: `pickClues(grid, cfg)`.
 
-Statt Hinweise zu einem leeren Set hinzuzufügen (zu langsam: schwacher Solver
-mit wenigen Constraints), läuft der Algorithmus rückwärts:
-
 1. **Mit allen Kandidaten starten**: Für jede Reihe/Spalte werden alle
-   anwendbaren Hinweise (1 duplicate bei Dopplung, 5 pairSum, 1 totalSum,
-   ggf. 1 Sequenz) ins ausgewählte Set gelegt — ~70 Hinweise gesamt.
-2. **Initiale Eindeutigkeitsprüfung** (`solve(2, 100k)`): bei diesem
-   stark constraintem Puzzle braucht der Solver nur ~50 Nodes. Wenn nicht
-   eindeutig: Gitter verwerfen.
-3. **Cap-Enforcement**: Pro „Over-Cap"-Linie (mehr als `cfg.maxPerLine`
-   Hinweise) wird versucht, Hinweise zu entfernen — pairSum zuerst, dann
-   totalSum, Sequenzen und Mandatory-Duplikate werden geschont. Nach jeder
-   Entfernung wird via `solve(2, 60k)` geprüft, ob das Puzzle eindeutig
-   bleibt; sonst wird der Hinweis wieder eingefügt.
-4. **Σ-Hinweis-Cap**: Globale Obergrenze von 5 totalSum-Hinweisen wird
-   erzwungen, indem überschüssige solange entfernt werden, wie Eindeutigkeit
-   gewahrt bleibt.
-5. **Sequenz-Lock** (wenn `cfg.lockSequence === true`): Linien mit
-   Sequenz-Hinweis werden noch einmal durchgegangen und alle nicht-Sequenz-,
-   nicht-Mandatory-Hinweise probeweise entfernt. So bleibt — wann immer
-   möglich — der Sequenz-Hinweis allein.
+   anwendbaren Hinweise (1 duplicate bei Dopplung, alle pairSum, 1 totalSum,
+   ggf. 1 Sequenz) ins Set gelegt — ~70–78 Hinweise. **Gate**: wenn schon
+   dieses Maximalset nicht deduzierbar ist (`logicalSolve`), Gitter verwerfen.
+2. **Phase 1 — maximal reduzieren**: In mehreren Durchläufen wird jeder
+   entfernbare Hinweis probeweise gelöscht und nur dann entfernt, wenn das
+   Rätsel deduzierbar bleibt. Reihenfolge: vollste Linien zuerst (das ebnet
+   die Verteilung ein), und je Linie totalSum vor pairSum (Sequenzen und
+   Mandatory-Duplikate werden geschont). Ergebnis: ein nahezu minimales,
+   gleichmäßig verteiltes Hinweisset.
+3. **Phase 2 — für leichtere Stufen wieder auffüllen**: Solange weniger als
+   `cfg.targetClues` Hinweise vorhanden sind, werden entfernte Kandidaten auf
+   die **leersten** Linien zurückgelegt (balanciert das Layout). Zusätzliche
+   Hinweise können Deduzierbarkeit nie zerstören. Schwer nutzt `targetClues:
+   0` → bleibt minimal.
+4. **Σ-Cap**: Höchstens 5 totalSum-Hinweise; überschüssige werden entfernt,
+   solange Deduzierbarkeit erhalten bleibt, sonst Gitter verwerfen.
+5. **Anzeige-Sortierung** pro Linie: duplicate, Sequenz, pairSums
+   (positionsweise), totalSum.
 
-Wenn nach Cap-Enforcement irgendeine Linie noch über dem Limit liegt oder
-das Σ-Cap nicht erreichbar ist, wird `null` zurückgegeben und der Worker
-probiert das nächste Gitter.
-
-## Solver
-
-Funktion: `solve(selected, countLimit, nodeLimit)`. Backtracking-Solver mit
-mehreren Optimierungen:
-
-- **Bitmaske als Domain**: Jede Zelle hat ein `Int32Array`-Eintrag, dessen
-  Bits 0–8 die noch möglichen Werte 1–9 darstellen. `domains[i] & ~bit`
-  und `POPCOUNT[domain]` per Lookup-Tabelle sind deutlich schneller als
-  `Set`-Operationen.
-- **Forward-Checking**: Beim Platzieren von Wert `v` in Zelle `idx` werden
-  sofort die Konsequenzen propagiert: aus den vier H/V-Nachbarn, aus der
-  restlichen Reihe/Spalte (außer für Dopplungs-Werte), und global, wenn
-  `counts[v]` 4 erreicht.
-- **MRV-Heuristik** (Most Restrained Variable): Bei jeder Rekursion wählt
-  `pickCellMRV()` die nicht zugewiesene Zelle mit der kleinsten Domain.
-  Bei Domain-Größe 1 wird sie sofort zurückgegeben.
-- **pairSum-Propagation**: Wenn Zelle A eines pairSum-Hinweises belegt
-  wird, wird die Domain der Partnerzelle B per `forceDomain` direkt auf
-  den einzig erlaubten Wert (Zielsumme − A) eingeschränkt. Das schneidet
-  enorm viele Zweige früh ab.
-- **Partielle Klausel-Validierung**: Andere Klauseltypen werden geprüft,
-  sobald alle ihrer Zellen belegt sind.
-- **Undo-Log per Bitpaket**: Pro Removal wird ein 32-bit-Int gepushed
-  (`(targetIdx << 4) | bitIdx`); Backtracking restauriert die Bits in
-  umgekehrter Reihenfolge ohne Speicherallokationen.
-
-Der Solver bricht ab, sobald `countLimit` Lösungen gefunden oder
-`nodeLimit` Knoten besucht wurden (`timedOut = true`). In `pickClues`
-wird mit 60–100k Knoten gearbeitet — bei stark constraintem Puzzle reicht
-das problemlos für eine vollständige Suche.
+Da jede Entfernung über `logicalSolve` geprüft wird, ist das emittierte Rätsel
+garantiert ohne Raten lösbar. Konsequenz der nötigen Redundanz: Linien tragen
+typisch 3–4 Hinweise (selten 5) statt der früher angestrebten 2–3.
 
 ## Lösungscode
 
@@ -145,28 +156,35 @@ Konfiguration im Worker (`DIFFICULTY_CONFIG`):
 
 | Parameter                              | Leicht | Mittel | Schwer |
 |----------------------------------------|:------:|:------:|:------:|
-| Garantierte Sequenzen                  |   3    |   2    |   1    |
-| Max. Hinweise pro Reihe/Spalte         |   3    |   2    |   2    |
-| Sequenz-Linien exklusiv                |  nein  |  ja    |  ja    |
+| Garantierte Sequenzen (`numSequences`) |   3    |   2    |   1    |
+| Hinweis-Zielzahl (`targetClues`)       |   32   |   27   |   0    |
+| Sequenz-Hinweis behalten (`keepSequences`) | ja | ja    |  ja    |
 | Max. Σ-Hinweise gesamt                 |   5    |   5    |   5    |
 | Max. Dopplungs-Linien im Gitter        |   5    |   5    |   5    |
-| Typische Gesamthinweiszahl             | ~28–34 | ~18–22 | ~16–22 |
+| Typische Gesamthinweiszahl             | ~32    | ~27    | ~20    |
 
-**Warum Schwer schwerer ist**: weniger Sequenz-Hinweise (die ganze Linien
-auf einen Schlag determinieren) bedeuten mehr Pair-Sum-Reasoning. Bei Mittel
-und Schwer enthält die Sequenz-Linie zudem nur den Sequenz-Hinweis, sodass
-keine redundanten Hilfen hinzukommen.
+`targetClues` steuert, wie weit Phase 2 wieder auffüllt: eine höhere Zahl
+bedeutet **mehr** redundante Hinweise und damit ein **leichteres** Rätsel.
+`targetClues: 0` (Schwer) füllt nicht auf — es bleibt beim nahezu minimalen,
+deduzierbaren Set. (Die Reduktion geht nie unter das, was Deduzierbarkeit
+erfordert; die reale Zahl kann den Zielwert bei Schwer also übersteigen.)
 
-**Warum Leicht leichter ist**: mehr Sequenzen, höheres Cap pro Linie, und
-keine Sequenz-Lock — die Sequenz-Linien bekommen zusätzlich pairSums oder
-totalSums dazu, was die Auflösung weiter vereinfacht.
+**Warum Schwer schwerer ist**: nahezu minimales Hinweisset → lange
+Deduktionsketten, kaum Redundanz, nur 1 Sequenz und (durch das frühe
+Entfernen) faktisch keine totalSum-Hinweise.
+
+**Warum Leicht leichter ist**: deutlich mehr (redundante) Hinweise auf
+gleichmäßig verteilten Linien und 3 Sequenzen, die ganze Linien auf einen
+Schlag stark determinieren.
 
 ## Performance
 
-Mit den oben beschriebenen Optimierungen liegen die typischen Laufzeiten
-pro Worker-Versuch bei ~200 ms (Mittel/Schwer) bis ~500 ms (Leicht, mehr
-Sequenzen → engere Generator-Constraints). Bei vier parallelen Workern
-liefert der erste Treffer üblicherweise in 1–3 Sekunden.
+`logicalSolve` ist im hinweisarmen Regime schnell **und** zuverlässig
+(Polynomialzeit-Fixpunkt statt exponentieller Suche). Ein Worker-Versuch
+(Gitter erzeugen + reduzieren) liegt bei ~5–9 ms; bei Mittel/Schwer liefert
+praktisch jedes erzeugte Gitter ein Rätsel, bei Leicht ~83 % (die
+Sequenz-Vorabbelegung für 3 Sequenzen scheitert öfter). Der erste Treffer
+erscheint mit vier parallelen Workern quasi sofort.
 
 Falls der Generator nach 400 Versuchen pro Worker × 4 Worker = 1600
 Versuche keinen Treffer findet, wird eine Fehlermeldung gezeigt

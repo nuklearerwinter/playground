@@ -436,226 +436,196 @@ function workerCode() {
     return cells;
   }
 
-  function verifyClue(clue, grid) {
-    switch (clue.type) {
-      case "pairSum": {
-        const [[r1,c1],[r2,c2]] = clue.cells;
-        return grid[r1][c1] + grid[r2][c2] === clue.value;
-      }
-      case "totalSum": {
-        const vals = clue.scope === "row" ? rowOf(grid, clue.index) : colOf(grid, clue.index);
-        return sumOf(vals) === clue.value;
-      }
-      case "duplicate": {
-        const vals = clue.scope === "row" ? rowOf(grid, clue.index) : colOf(grid, clue.index);
-        let c = 0;
-        for (let i = 0; i < vals.length; i++) if (vals[i] === clue.value) c++;
-        return c === 2;
-      }
-      case "directSequence": {
-        const vals = clue.scope === "row" ? rowOf(grid, clue.index) : colOf(grid, clue.index);
-        return isDirectSequence(vals);
-      }
-      case "ascending": {
-        const vals = clue.scope === "row" ? rowOf(grid, clue.index) : colOf(grid, clue.index);
-        return isAscending(vals);
-      }
-      case "descending": {
-        const vals = clue.scope === "row" ? rowOf(grid, clue.index) : colOf(grid, clue.index);
-        return isDescending(vals);
-      }
-    }
-    return false;
-  }
-
-  // Optimized solver: bitmask domains, forward checking, MRV, pairSum propagation
-  function solve(selected, countLimit, nodeLimit) {
-    countLimit = countLimit || 2;
-    nodeLimit = nodeLimit || 600000;
-
-    const allClues = [];
-    const rowDupVals = new Map();
-    const colDupVals = new Map();
-    for (let r = 0; r < N; r++) for (const cl of selected.rowClues[r]) {
-      allClues.push(cl);
+  // Propagation-only ("logical") solver: applies sound deductions to a
+  // fixpoint WITHOUT ever guessing/branching. If it determines every cell,
+  // the puzzle is solvable by pure reasoning — i.e. a human never has to
+  // guess. Used as the acceptance gate so we only emit deducible puzzles.
+  // (A complete solve here also proves uniqueness, since every elimination
+  // is valid in every solution.)
+  function logicalSolve(selected) {
+    const rowDup = new Int32Array(N);
+    const colDup = new Int32Array(N);
+    const pairs = [];
+    const totals = [];
+    const seqs = [];
+    function reg(cl) {
       if (cl.type === "duplicate") {
-        if (!rowDupVals.has(r)) rowDupVals.set(r, new Set());
-        rowDupVals.get(r).add(cl.value);
+        if (cl.scope === "row") rowDup[cl.index] |= 1 << (cl.value - 1);
+        else colDup[cl.index] |= 1 << (cl.value - 1);
+      } else if (cl.type === "pairSum") {
+        const a = cl.cells[0][0]*N + cl.cells[0][1];
+        const b = cl.cells[1][0]*N + cl.cells[1][1];
+        pairs.push({ a: a, b: b, value: cl.value });
+      } else if (cl.type === "totalSum") {
+        totals.push({ cells: clueCells(cl), value: cl.value });
+      } else if (cl.type === "directSequence" || cl.type === "ascending" || cl.type === "descending") {
+        seqs.push({ cells: clueCells(cl), type: cl.type });
       }
     }
-    for (let c = 0; c < N; c++) for (const cl of selected.colClues[c]) {
-      allClues.push(cl);
-      if (cl.type === "duplicate") {
-        if (!colDupVals.has(c)) colDupVals.set(c, new Set());
-        colDupVals.get(c).add(cl.value);
-      }
-    }
-
-    const clueCellsMap = new Map();
-    for (const cl of allClues) clueCellsMap.set(cl, clueCells(cl));
-
-    const cluesByCell = [];
-    for (let i = 0; i < N*N; i++) cluesByCell.push([]);
-    for (const cl of allClues) {
-      for (const idx of clueCellsMap.get(cl)) cluesByCell[idx].push(cl);
-    }
+    for (let r = 0; r < N; r++) for (const cl of selected.rowClues[r]) reg(cl);
+    for (let c = 0; c < N; c++) for (const cl of selected.colClues[c]) reg(cl);
 
     const domains = new Int32Array(N*N).fill(FULL_DOMAIN);
-    const assigned = new Uint8Array(N*N);
-    const grid = Array.from({length: N}, () => Array(N).fill(0));
-    const counts = new Int8Array(10);
+    let progress = true;
+    let bad = false;
 
-    let solutionCount = 0;
-    let firstSolution = null;
-    let nodes = 0;
-    let timedOut = false;
-
-    function removeBit(targetIdx, v, undo) {
-      if (assigned[targetIdx]) return true;
+    function clearBit(idx, v) {
       const bit = 1 << (v - 1);
-      if (domains[targetIdx] & bit) {
-        domains[targetIdx] &= ~bit;
-        undo.push((targetIdx << 4) | (v - 1));
-        if (domains[targetIdx] === 0) return false;
+      if (domains[idx] & bit) {
+        domains[idx] &= ~bit;
+        progress = true;
+        if (domains[idx] === 0) bad = true;
       }
-      return true;
     }
+    function restrict(idx, mask) {
+      const nd = domains[idx] & mask;
+      if (nd !== domains[idx]) {
+        domains[idx] = nd;
+        progress = true;
+        if (nd === 0) bad = true;
+      }
+    }
+    function minV(mask) { for (let v = 1; v <= 9; v++) if (mask & (1 << (v-1))) return v; return 0; }
+    function maxV(mask) { for (let v = 9; v >= 1; v--) if (mask & (1 << (v-1))) return v; return 0; }
+    function isSingle(idx) { return POPCOUNT[domains[idx]] === 1; }
 
-    function forceDomain(targetIdx, mask, undo) {
-      if (assigned[targetIdx]) return true;
-      const cur = domains[targetIdx];
-      const toRemove = cur & ~mask;
-      if (!toRemove) return (cur & mask) !== 0;
+    // A row/col holds only 6 of the 9 values, so most values appear 0 or 1
+    // times — there is NO "every value appears" lower bound (unlike Sudoku).
+    // The only per-line lower bound is the explicit duplicate value, which
+    // must appear exactly twice. So hidden-single reasoning applies solely to
+    // the duplicate value; for everything else we enforce just distinctness.
+    function unitElim(getIdx, dupMask) {
       for (let v = 1; v <= 9; v++) {
-        const b = 1 << (v - 1);
-        if (toRemove & b) {
-          domains[targetIdx] &= ~b;
-          undo.push((targetIdx << 4) | (v - 1));
+        const bit = 1 << (v - 1);
+        const isDup = (dupMask & bit) !== 0;
+        const maxCount = isDup ? 2 : 1;
+        let single = 0;
+        const open = [];
+        for (let k = 0; k < N; k++) {
+          const idx = getIdx(k);
+          if (domains[idx] & bit) { if (isSingle(idx)) single++; else open.push(idx); }
+        }
+        if (single > maxCount) { bad = true; return; }
+        if (single >= maxCount) {
+          for (const idx of open) clearBit(idx, v); // distinctness: no more copies allowed
+        } else if (isDup) {
+          // Duplicate value must appear exactly twice -> lower bound applies.
+          if (single + open.length < maxCount) { bad = true; return; }
+          if (open.length === maxCount - single) for (const idx of open) restrict(idx, bit);
         }
       }
-      return domains[targetIdx] !== 0;
     }
 
-    function place(idx, v, undo) {
-      const r = (idx / N) | 0;
-      const c = idx % N;
-      grid[r][c] = v;
-      counts[v]++;
-      assigned[idx] = 1;
+    let guard = 0;
+    while (progress && !bad && guard++ < 200) {
+      progress = false;
 
-      if (r > 0 && !removeBit((r-1)*N+c, v, undo)) return false;
-      if (r < N-1 && !removeBit((r+1)*N+c, v, undo)) return false;
-      if (c > 0 && !removeBit(r*N+c-1, v, undo)) return false;
-      if (c < N-1 && !removeBit(r*N+c+1, v, undo)) return false;
-
-      let rowCnt = 0;
-      for (let cc = 0; cc < N; cc++) if (grid[r][cc] === v) rowCnt++;
-      const rowDup = rowDupVals.get(r);
-      const rowMax = (rowDup && rowDup.has(v)) ? 2 : 1;
-      if (rowCnt >= rowMax) {
-        for (let cc = 0; cc < N; cc++) {
-          if (cc !== c && !removeBit(r*N+cc, v, undo)) return false;
-        }
+      // Adjacency: a fixed value forbids itself in the 4 orthogonal neighbours.
+      for (let r = 0; r < N && !bad; r++) for (let c = 0; c < N; c++) {
+        const idx = r*N + c;
+        if (!isSingle(idx)) continue;
+        const v = minV(domains[idx]);
+        if (r > 0) clearBit((r-1)*N+c, v);
+        if (r < N-1) clearBit((r+1)*N+c, v);
+        if (c > 0) clearBit(r*N+c-1, v);
+        if (c < N-1) clearBit(r*N+c+1, v);
       }
+      if (bad) break;
 
-      let colCnt = 0;
-      for (let rr = 0; rr < N; rr++) if (grid[rr][c] === v) colCnt++;
-      const colDup = colDupVals.get(c);
-      const colMax = (colDup && colDup.has(v)) ? 2 : 1;
-      if (colCnt >= colMax) {
-        for (let rr = 0; rr < N; rr++) {
-          if (rr !== r && !removeBit(rr*N+c, v, undo)) return false;
-        }
-      }
+      // Per-row / per-col uniqueness elimination + hidden singles.
+      for (let r = 0; r < N && !bad; r++) unitElim(k => r*N + k, rowDup[r]);
+      if (bad) break;
+      for (let c = 0; c < N && !bad; c++) unitElim(k => k*N + c, colDup[c]);
+      if (bad) break;
 
-      if (counts[v] >= 4) {
+      // Global count: each value appears exactly 4×.
+      for (let v = 1; v <= 9 && !bad; v++) {
+        const bit = 1 << (v - 1);
+        let single = 0, possible = 0;
+        const open = [];
         for (let i = 0; i < N*N; i++) {
-          if (i !== idx && !removeBit(i, v, undo)) return false;
+          if (domains[i] & bit) { possible++; if (isSingle(i)) single++; else open.push(i); }
         }
+        if (single > 4 || possible < 4) { bad = true; break; }
+        if (single >= 4) for (const idx of open) clearBit(idx, v);
       }
+      if (bad) break;
 
-      const cluesHere = cluesByCell[idx];
-      for (let k = 0; k < cluesHere.length; k++) {
-        const cl = cluesHere[k];
-        const cells = clueCellsMap.get(cl);
-        if (cl.type === "pairSum") {
-          const otherIdx = cells[0] === idx ? cells[1] : cells[0];
-          const otherR = (otherIdx / N) | 0;
-          const otherC = otherIdx % N;
-          if (assigned[otherIdx]) {
-            if (grid[otherR][otherC] + v !== cl.value) return false;
-          } else {
-            const needed = cl.value - v;
-            if (needed < 1 || needed > 9) return false;
-            const mask = 1 << (needed - 1);
-            if (!forceDomain(otherIdx, mask, undo)) return false;
+      // pairSum: arc consistency on A + B = value.
+      for (const p of pairs) {
+        const da = domains[p.a], db = domains[p.b];
+        let maskA = 0, maskB = 0;
+        for (let v = 1; v <= 9; v++) {
+          const w = p.value - v;
+          if (w < 1 || w > 9) continue;
+          if ((da & (1 << (v-1))) && (db & (1 << (w-1)))) { maskA |= 1 << (v-1); maskB |= 1 << (w-1); }
+        }
+        restrict(p.a, maskA);
+        restrict(p.b, maskB);
+        if (bad) break;
+      }
+      if (bad) break;
+
+      // totalSum: bounds propagation on the six cells of a row/col.
+      for (const t of totals) {
+        const cells = t.cells;
+        for (let k = 0; k < cells.length; k++) {
+          let minOther = 0, maxOther = 0;
+          for (let j = 0; j < cells.length; j++) {
+            if (j === k) continue;
+            minOther += minV(domains[cells[j]]);
+            maxOther += maxV(domains[cells[j]]);
           }
-        } else {
-          let allFilled = true;
-          for (let m = 0; m < cells.length; m++) {
-            if (!assigned[cells[m]]) { allFilled = false; break; }
+          const lo = t.value - maxOther, hi = t.value - minOther;
+          let mask = 0;
+          for (let v = Math.max(1, lo); v <= Math.min(9, hi); v++) mask |= 1 << (v-1);
+          restrict(cells[k], mask);
+          if (bad) break;
+        }
+        if (bad) break;
+      }
+      if (bad) break;
+
+      // Sequences: relational propagation along the line.
+      for (const s of seqs) {
+        const cells = s.cells;
+        if (s.type === "directSequence") {
+          for (let k = 0; k < cells.length - 1; k++) {
+            restrict(cells[k+1], (domains[cells[k]] << 1) & FULL_DOMAIN);
+            restrict(cells[k], domains[cells[k+1]] >> 1);
           }
-          if (allFilled && !verifyClue(cl, grid)) return false;
+        } else if (s.type === "ascending") {
+          for (let k = 0; k < cells.length - 1; k++) {
+            const mn = minV(domains[cells[k]]);
+            let m1 = 0; for (let v = mn + 1; v <= 9; v++) m1 |= 1 << (v-1);
+            restrict(cells[k+1], m1);
+            const mx = maxV(domains[cells[k+1]]);
+            let m2 = 0; for (let v = 1; v <= mx - 1; v++) m2 |= 1 << (v-1);
+            restrict(cells[k], m2);
+          }
+        } else { // descending
+          for (let k = 0; k < cells.length - 1; k++) {
+            const mx = maxV(domains[cells[k]]);
+            let m1 = 0; for (let v = 1; v <= mx - 1; v++) m1 |= 1 << (v-1);
+            restrict(cells[k+1], m1);
+            const mn = minV(domains[cells[k+1]]);
+            let m2 = 0; for (let v = mn + 1; v <= 9; v++) m2 |= 1 << (v-1);
+            restrict(cells[k], m2);
+          }
         }
+        if (bad) break;
       }
-
-      return true;
+      if (bad) break;
     }
 
-    function unplace(idx, v, undo) {
-      const r = (idx / N) | 0;
-      const c = idx % N;
-      grid[r][c] = 0;
-      counts[v]--;
-      assigned[idx] = 0;
-      for (let i = undo.length - 1; i >= 0; i--) {
-        const packed = undo[i];
-        const cellIdx = packed >> 4;
-        const bitIdx = packed & 0xF;
-        domains[cellIdx] |= (1 << bitIdx);
-      }
+    if (bad) return { solved: false, grid: null };
+    for (let i = 0; i < N*N; i++) if (POPCOUNT[domains[i]] !== 1) return { solved: false, grid: null };
+    const out = Array.from({ length: N }, () => Array(N).fill(0));
+    for (let i = 0; i < N*N; i++) {
+      let v = 1; while (!(domains[i] & (1 << (v-1)))) v++;
+      out[(i / N) | 0][i % N] = v;
     }
-
-    function pickCellMRV() {
-      let best = -1;
-      let bestSize = 100;
-      for (let i = 0; i < N*N; i++) {
-        if (assigned[i]) continue;
-        const sz = POPCOUNT[domains[i]];
-        if (sz < bestSize) {
-          bestSize = sz;
-          best = i;
-          if (sz <= 1) return i;
-        }
-      }
-      return best;
-    }
-
-    function fillBT() {
-      if (timedOut || solutionCount >= countLimit) return;
-      nodes++;
-      if (nodes > nodeLimit) { timedOut = true; return; }
-
-      const idx = pickCellMRV();
-      if (idx === -1) {
-        for (let k = 0; k < allClues.length; k++) if (!verifyClue(allClues[k], grid)) return;
-        solutionCount++;
-        if (!firstSolution) firstSolution = grid.map(row => row.slice());
-        return;
-      }
-
-      const d = domains[idx];
-      for (let v = 1; v <= 9; v++) {
-        if (!(d & (1 << (v-1)))) continue;
-        const undo = [];
-        if (place(idx, v, undo)) fillBT();
-        unplace(idx, v, undo);
-        if (timedOut || solutionCount >= countLimit) return;
-      }
-    }
-
-    fillBT();
-    return { count: solutionCount, solution: firstSolution, timedOut };
+    return { solved: true, grid: out };
   }
 
   function emptyClueSet() {
@@ -663,141 +633,144 @@ function workerCode() {
     for (let i = 0; i < N; i++) { r.push([]); c.push([]); }
     return { rowClues: r, colClues: c };
   }
-  function typePriority(t) {
-    const m = { directSequence: 0, ascending: 1, descending: 1, totalSum: 2, pairSum: 3 };
-    return t in m ? m[t] : 9;
-  }
-
+  // A puzzle is "acceptable" iff logicalSolve fully determines the grid by
+  // pure deduction. Because every elimination logicalSolve makes is valid in
+  // EVERY solution, a fully-determined grid is also a proof of uniqueness — so
+  // logicalSolve is the single source of truth here (no backtracking needed).
   function pickClues(grid, cfg) {
     const cands = buildCandidateClues(grid);
-    const MAX_TOTAL_SUMS = 5;
     function isSeqType(t) { return t === "directSequence" || t === "ascending" || t === "descending"; }
 
-    // Start with ALL candidate clues — heavily constrained, so the solver is very fast
+    // Start with ALL candidate clues, then remove as many as possible while
+    // the puzzle stays deducible. Fewer remaining clues ⇒ harder.
     const selected = emptyClueSet();
     for (let r = 0; r < N; r++) for (const cl of cands.rowCands[r]) selected.rowClues[r].push(cl);
     for (let c = 0; c < N; c++) for (const cl of cands.colCands[c]) selected.colClues[c].push(cl);
 
-    // Sanity check
-    const initial = solve(selected, 2, 100000);
-    if (initial.timedOut || initial.count !== 1) return null;
+    // Gate: even the maximal clue set must be deducible. (It nearly always is,
+    // since every adjacent pairSum plus every totalSum is present.)
+    if (!logicalSolve(selected).solved) return null;
 
-    function removeScore(cl) {
-      if (cl.mandatory) return -1;
-      if (cl.type === "pairSum") return 3;
-      if (cl.type === "totalSum") return 2;
-      // sequences kept if possible
-      return 1;
+    function totalClues() {
+      let n = 0;
+      for (const list of selected.rowClues) n += list.length;
+      for (const list of selected.colClues) n += list.length;
+      return n;
+    }
+    function shuffle(arr) {
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+      }
+      return arr;
+    }
+    const MAX_TOTAL_SUMS = 5; // "Summe aller Zahlen" should stay a rare hint
+    function countTotalSums() {
+      let n = 0;
+      for (const list of selected.rowClues) for (const cl of list) if (cl.type === "totalSum") n++;
+      for (const list of selected.colClues) for (const cl of list) if (cl.type === "totalSum") n++;
+      return n;
+    }
+    // Removal preference during reduction: drop totalSum first (we want few of
+    // them), then pairSum, sequences last. Mandatory (duplicate) clues are
+    // never removed — without them the default "all distinct" assumption is
+    // wrong — and sequence clues are kept for visual variety.
+    function removeRank(cl) {
+      if (cl.type === "totalSum") return 0;
+      if (cl.type === "pairSum") return 1;
+      return 2;
     }
 
-    // Cap-enforcement only: remove clues from over-cap lines, never below cap.
-    // This keeps the puzzle "well-constrained" — solver stays fast (forward + pairSum propagation effective).
+    // PHASE 1 — reduce as far as possible. Walk every removable clue (fullest
+    // lines first, so the distribution flattens) and drop it whenever the
+    // puzzle stays fully deducible. This yields a near-minimal, evenly spread
+    // clue set with no heavy lines.
     let pass = 0;
-    while (pass++ < 10) {
-      const overLines = [];
-      for (let r = 0; r < N; r++) if (selected.rowClues[r].length > cfg.maxPerLine) overLines.push({ kind: "row", i: r });
-      for (let c = 0; c < N; c++) if (selected.colClues[c].length > cfg.maxPerLine) overLines.push({ kind: "col", i: c });
-      if (!overLines.length) break;
-
-      // Randomize order
-      for (let i = overLines.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        const t = overLines[i]; overLines[i] = overLines[j]; overLines[j] = t;
-      }
+    while (pass++ < 30) {
+      const entries = [];
+      for (let r = 0; r < N; r++) for (const cl of selected.rowClues[r]) entries.push({ list: selected.rowClues[r], cl });
+      for (let c = 0; c < N; c++) for (const cl of selected.colClues[c]) entries.push({ list: selected.colClues[c], cl });
+      shuffle(entries);
+      entries.sort((a, b) => (b.list.length - a.list.length) || (removeRank(a.cl) - removeRank(b.cl)));
 
       let removedAny = false;
-      for (const oc of overLines) {
-        const list = oc.kind === "row" ? selected.rowClues[oc.i] : selected.colClues[oc.i];
-        if (list.length <= cfg.maxPerLine) continue;
-        // Build removable candidates, shuffled, then sorted (low-info first)
-        const removable = list.filter(c => !c.mandatory).slice();
-        for (let i = removable.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          const t = removable[i]; removable[i] = removable[j]; removable[j] = t;
-        }
-        removable.sort((a, b) => removeScore(b) - removeScore(a));
-
-        for (const cand of removable) {
-          if (list.length <= cfg.maxPerLine) break;
-          const idx = list.indexOf(cand);
-          if (idx < 0) continue;
-          list.splice(idx, 1);
-          const r = solve(selected, 2, 60000);
-          if (r.timedOut || r.count !== 1) {
-            list.splice(idx, 0, cand);
-          } else {
-            removedAny = true;
-          }
-        }
+      for (const { list, cl } of entries) {
+        if (cl.mandatory || isSeqType(cl.type)) continue;
+        const idx = list.indexOf(cl);
+        if (idx < 0) continue;
+        list.splice(idx, 1);
+        if (logicalSolve(selected).solved) removedAny = true;
+        else list.splice(idx, 0, cl); // removal broke deducibility — keep it
       }
       if (!removedAny) break;
     }
 
-    // Final per-line cap check
-    for (let r = 0; r < N; r++) if (selected.rowClues[r].length > cfg.maxPerLine) return null;
-    for (let c = 0; c < N; c++) if (selected.colClues[c].length > cfg.maxPerLine) return null;
-
-    // Enforce totalSum global cap (≤ MAX_TOTAL_SUMS)
-    let tsCount = 0;
-    for (const cs of selected.rowClues) for (const cl of cs) if (cl.type === "totalSum") tsCount++;
-    for (const cs of selected.colClues) for (const cl of cs) if (cl.type === "totalSum") tsCount++;
-    while (tsCount > MAX_TOTAL_SUMS) {
-      const tsCands = [];
-      for (let r = 0; r < N; r++) for (const cl of selected.rowClues[r]) if (cl.type === "totalSum") tsCands.push({ kind: "row", i: r, clue: cl });
-      for (let c = 0; c < N; c++) for (const cl of selected.colClues[c]) if (cl.type === "totalSum") tsCands.push({ kind: "col", i: c, clue: cl });
-      for (let i = tsCands.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        const t = tsCands[i]; tsCands[i] = tsCands[j]; tsCands[j] = t;
+    // PHASE 2 — for easier levels, add redundant clues back onto the emptiest
+    // lines until the difficulty's clue target is met. Re-adding clues can
+    // never break deducibility, and targeting sparse lines keeps the layout
+    // balanced (no line ends up overloaded). Hard uses target 0 → stays minimal.
+    if (cfg.targetClues > totalClues()) {
+      const lineOf = e => e.kind === "row" ? selected.rowClues[e.i] : selected.colClues[e.i];
+      const pool = [];
+      for (let r = 0; r < N; r++) for (const cl of cands.rowCands[r]) if (selected.rowClues[r].indexOf(cl) < 0) pool.push({ kind: "row", i: r, cl });
+      for (let c = 0; c < N; c++) for (const cl of cands.colCands[c]) if (selected.colClues[c].indexOf(cl) < 0) pool.push({ kind: "col", i: c, cl });
+      shuffle(pool);
+      while (totalClues() < cfg.targetClues && pool.length) {
+        let bestK = -1, bestLen = Infinity;
+        for (let k = 0; k < pool.length; k++) {
+          const len = lineOf(pool[k]).length;
+          if (len < bestLen) { bestLen = len; bestK = k; }
+        }
+        const e = pool.splice(bestK, 1)[0];
+        // Don't let add-back push totalSums past the cap; prefer pairSums.
+        if (e.cl.type === "totalSum" && countTotalSums() >= MAX_TOTAL_SUMS) continue;
+        lineOf(e).push(e.cl);
       }
-      let didRemove = false;
-      for (const cand of tsCands) {
-        const list = cand.kind === "row" ? selected.rowClues[cand.i] : selected.colClues[cand.i];
-        const idx = list.indexOf(cand.clue);
+    }
+
+    // Enforce the totalSum cap: if reduction still left more than the cap
+    // (some were needed for deducibility), try to shed the extras while the
+    // puzzle stays deducible. If that's impossible, reject this grid.
+    if (countTotalSums() > MAX_TOTAL_SUMS) {
+      const ts = [];
+      for (let r = 0; r < N; r++) for (const cl of selected.rowClues[r]) if (cl.type === "totalSum") ts.push({ list: selected.rowClues[r], cl });
+      for (let c = 0; c < N; c++) for (const cl of selected.colClues[c]) if (cl.type === "totalSum") ts.push({ list: selected.colClues[c], cl });
+      shuffle(ts);
+      for (const { list, cl } of ts) {
+        if (countTotalSums() <= MAX_TOTAL_SUMS) break;
+        const idx = list.indexOf(cl);
         if (idx < 0) continue;
         list.splice(idx, 1);
-        const r = solve(selected, 2, 60000);
-        if (r.timedOut || r.count !== 1) {
-          list.splice(idx, 0, cand.clue);
-        } else {
-          tsCount--;
-          didRemove = true;
-          break;
-        }
+        if (!logicalSolve(selected).solved) list.splice(idx, 0, cl);
       }
-      if (!didRemove) return null;
+      if (countTotalSums() > MAX_TOTAL_SUMS) return null;
     }
 
-    // Enforce sequence-locks-line: try to remove non-sequence non-mandatory clues from lines that contain a sequence
-    if (cfg.lockSequence) {
-      function tryLockLine(list) {
-        const removable = list.filter(cl => !cl.mandatory && !isSeqType(cl.type));
-        for (const cand of removable) {
-          const idx = list.indexOf(cand);
-          if (idx < 0) continue;
-          list.splice(idx, 1);
-          const r = solve(selected, 2, 60000);
-          if (r.timedOut || r.count !== 1) {
-            list.splice(idx, 0, cand);
-          } else if (list.find(cl => cl.type === "totalSum")) {
-            // totalSum count may have changed — recompute on next iteration
-          }
-        }
-      }
-      for (let r = 0; r < N; r++) {
-        if (selected.rowClues[r].some(cl => isSeqType(cl.type))) tryLockLine(selected.rowClues[r]);
-      }
-      for (let c = 0; c < N; c++) {
-        if (selected.colClues[c].some(cl => isSeqType(cl.type))) tryLockLine(selected.colClues[c]);
-      }
+    // Tidy display order within each line: duplicate, sequence, pairSums
+    // (left-to-right / top-to-bottom), then totalSum.
+    function displayRank(cl) {
+      if (cl.type === "duplicate") return 0;
+      if (isSeqType(cl.type)) return 1;
+      if (cl.type === "pairSum") return 2 + cl.cells[0][0]*N + cl.cells[0][1];
+      return 100; // totalSum
     }
+    for (let r = 0; r < N; r++) selected.rowClues[r].sort((a, b) => displayRank(a) - displayRank(b));
+    for (let c = 0; c < N; c++) selected.colClues[c].sort((a, b) => displayRank(a) - displayRank(b));
 
+    // Final guarantee: the emitted puzzle is solvable by deduction alone.
+    if (!logicalSolve(selected).solved) return null;
     return selected;
   }
 
+  // targetClues: greedy reduction stops once the clue count reaches this — a
+  // lower target means fewer clues and a harder puzzle. (Reduction never goes
+  // below what deducibility requires, so the real count can exceed the target
+  // for hard.) numSequences seeds visual variety; more sequences also make a
+  // puzzle easier, since a sequence line is highly determining.
   const DIFFICULTY_CONFIG = {
-    easy:   { numSequences: 3, maxPerLine: 3, lockSequence: false },
-    medium: { numSequences: 2, maxPerLine: 2, lockSequence: true },
-    hard:   { numSequences: 1, maxPerLine: 2, lockSequence: true },
+    easy:   { numSequences: 3, targetClues: 32, keepSequences: true },
+    medium: { numSequences: 2, targetClues: 27, keepSequences: true },
+    hard:   { numSequences: 1, targetClues: 0,  keepSequences: true },
   };
 
   self.onmessage = function(e) {
