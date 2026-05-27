@@ -875,16 +875,15 @@ let activeWorkers = [];
 
 // === Time-budget tournament ===
 // Several workers minimise clue counts in parallel; the main thread keeps the
-// global best (fewest clues), shows it live, and stops at a time budget (or
-// early on a plateau, or when the user clicks "Übernehmen").
+// global best (fewest clues), shows it live, and runs for the full time budget
+// (or until the user clicks "Übernehmen"). The progress bar and the countdown
+// therefore match the actual search duration.
 const DEFAULT_BUDGET_MS = 6000;
 const EXTEND_MS = 10000;
-const STALL_MS = 2500; // stop early if no improvement for this long…
-const MIN_MS = 3000;   // …but never before this much has elapsed
 
 let globalBest = null;   // { grid, clues, clueCount }
 let searchTimer = null;
-let searchStart = 0, searchDeadline = 0, lastImproveAt = 0, totalAttempts = 0;
+let searchStart = 0, searchDeadline = 0, totalAttempts = 0;
 let searching = false;
 let searchConfig = null; // clue-type config for the current/most-recent search
 
@@ -924,7 +923,6 @@ function onWorkerMessage(e) {
   } else if (d.type === "candidate") {
     if (!globalBest || d.clueCount < globalBest.clueCount) {
       globalBest = { grid: d.grid, clues: d.clues, clueCount: d.clueCount };
-      lastImproveAt = Date.now();
       updateSearchStatus();
     }
   }
@@ -948,10 +946,8 @@ function spawnWorkers() {
 }
 
 function searchTick() {
-  const now = Date.now();
   updateSearchStatus();
-  const stalled = globalBest && (now - lastImproveAt) > STALL_MS && (now - searchStart) > MIN_MS;
-  if (now >= searchDeadline || stalled) finishSearch();
+  if (Date.now() >= searchDeadline) finishSearch();
 }
 
 function startSearch(budgetMs, fresh) {
@@ -961,7 +957,6 @@ function startSearch(budgetMs, fresh) {
   totalAttempts = 0;
   searchStart = Date.now();
   searchDeadline = searchStart + budgetMs;
-  lastImproveAt = searchStart;
 
   el("generate-btn").disabled = true;
   el("print-btn").disabled = true;
