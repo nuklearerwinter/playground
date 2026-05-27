@@ -158,6 +158,35 @@ verpackt (Alphabet `0–9 A–Z` ohne `I L O U`):
 Beim Eingabefeld werden Kleinbuchstaben, Bindestriche und Leerzeichen
 toleriert. Ungültige Codes werden über die Prüfsumme erkannt.
 
+## Lösungsweg (Schritt für Schritt, Kandidaten-Darstellung)
+
+Funktion: `solveWithTrace(clues)` (Hauptthread). Eigenständige, **tracende
+Variante von `logicalSolve`** — gleiche Regeln, aber jede **Regelanwendung, die
+Kandidaten entfernt, ergibt einen Schritt**: `{ reason, removals:[{idx,vals}],
+solved:[idx] }`. Sie löst **allein aus den Clues** (liest nie
+`currentPuzzle.grid`) und liefert `{ solved, steps, grid }`. Typisch ~100–120
+Schritte pro Rätsel.
+
+Die Darstellung ist **Sudoku-artig mit Pencil-Marks**: jede Zelle zeigt ihre
+noch möglichen Ziffern (3×3-Raster); pro Schritt werden die durch die Regel
+entfernten Kandidaten durchgestrichen und verschwinden danach. Erreicht eine
+Zelle genau einen Kandidaten, wird sie als große Ziffer „gelöst" dargestellt.
+So wird z. B. „A5 = 9 aus A5+B5=14" nachvollziehbar, weil man B5s schon
+eingeschränkte Kandidaten sieht.
+
+`renderStep` spielt die `removals` der ersten N Schritte auf volle Domains
+(1–9) zurück, um den Kandidatenstand bei Schritt N zu zeigen. Bedienung
+(`enterStepMode`/`renderStep`/`stepNext`/`stepPrev`/`stepReset`/`togglePlay`/
+`exitStepMode`): Vor/Zurück/Zurücksetzen + Abspielen (~400 ms/Schritt) und eine
+mitlaufende, klickbare Schrittliste mit Begründung + entfernten Werten.
+
+**Wichtig:** `solveWithTrace` muss die Regeln von `logicalSolve` spiegeln — bei
+Solver-Änderungen beide anpassen. Sicherheitsnetz: stimmt `grid` nicht mit der
+bekannten Lösung überein (Drift/Bug), wird der Schritt-Modus übersprungen und
+die Lösung direkt eingeblendet. Validierung headless via Node-Kopie der
+Funktion (Brace-Matching extrahieren): gelöst, zurückgespielte `removals` ==
+Lösung, kein Entfernen abwesender Werte, keine geleerte Domain.
+
 ## Suchstrategie & Schwierigkeit (Zeit-Turnier)
 
 Es gibt **keine festen Schwierigkeitsstufen** mehr. Stattdessen bestimmt die

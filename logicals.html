@@ -39,6 +39,28 @@
   table#grid { --cell: clamp(32px, 11.5vw, 64px); border-collapse: collapse; margin: 1.2em auto 1em; }
   table#grid th { width: var(--cell); height: var(--cell); font-size: calc(var(--cell) * 0.42); color: var(--accent); font-family: Georgia, serif; font-weight: bold; }
   table#grid td { width: var(--cell); height: var(--cell); border: 1.5px solid #222; text-align: center; font-size: calc(var(--cell) * 0.42); vertical-align: middle; background: white; font-family: Georgia, serif; }
+  /* Lösungsweg-Modus: Kandidaten als Pencil-Marks; etwas größere Zellen für Lesbarkeit. */
+  table#grid.pencil { --cell: clamp(42px, 13vw, 72px); }
+  table#grid.pencil td { padding: 0; }
+  table#grid td .cands { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); width: 100%; height: 100%; font-size: calc(var(--cell) * 0.24); line-height: 1; color: #8a8a8a; font-family: Arial, Helvetica, sans-serif; }
+  table#grid td .cands span { display: flex; align-items: center; justify-content: center; }
+  table#grid td .cands span.removed { color: #c33; text-decoration: line-through; }
+  table#grid td .solved { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; font-weight: bold; color: #111; }
+  table#grid.pencil td.changed { background: #fff3cf; }
+  table#grid.pencil td.solved-now { background: #d9f2f2; }
+  /* Lösungsweg: Gitter + mitlaufende Schrittliste nebeneinander (auf Mobile untereinander). */
+  .solve-area { display: flex; gap: 1.2em; align-items: flex-start; justify-content: center; flex-wrap: wrap; margin: 1.2em 0 1em; }
+  .solve-area table#grid { margin: 0; }
+  #step-list { margin: 0; padding: 0; list-style: none; flex: 1 1 260px; min-width: 0; max-width: 360px; max-height: 420px; overflow-y: auto; font-size: 0.92em; border: 1px solid #ddd; border-radius: 6px; }
+  #step-list[hidden] { display: none; }
+  #step-list li { padding: 0.32em 0.6em; border-bottom: 1px solid #eee; cursor: pointer; line-height: 1.3; }
+  #step-list li:last-child { border-bottom: none; }
+  #step-list li:hover { background: #f4fafa; }
+  #step-list li.current { background: #e3f4f4; font-weight: 600; }
+  #step-list .stp-cell { font-weight: bold; color: var(--accent); }
+  .step-controls { display: flex; flex-wrap: wrap; gap: 0.4em; align-items: center; margin: 0.2em 0 0.6em; }
+  .step-controls[hidden] { display: none; }
+  .step-controls #step-counter { color: #555; font-size: 0.9em; margin-left: 0.3em; }
   .difficulty-display { font-size: 1em; color: #444; margin: 0.4em 0 0.2em; font-style: italic; }
   .difficulty-display span { font-style: normal; font-weight: bold; color: var(--accent); }
   .solution-code { font-family: "Courier New", monospace; background: #f7f7f7; padding: 0.7em 0.9em; border-radius: 4px; margin: 0.8em 0; word-break: break-all; display: flex; align-items: center; gap: 1em; flex-wrap: wrap; justify-content: center; }
@@ -65,6 +87,9 @@
   @media print {
     body { max-width: none; margin: 0; padding: 0.5cm; font-size: 11pt; position: relative; }
     .controls, .reveal, #error, #progress, header > details { display: none !important; }
+    #step-list, .step-controls, #steps-btn { display: none !important; }
+    .solve-area { display: block; }
+    .solve-area table#grid { margin: 0.6cm auto; }
     header { padding-right: 2.6cm; }
     h1 { font-size: 14pt; margin: 0 0 0.2cm; }
     .intro { font-size: 9.5pt; margin: 0 0 0.3cm; color: #333; line-height: 1.3; }
@@ -96,6 +121,7 @@
     <button id="generate-btn">Neues Rätsel</button>
     <button id="accept-btn" hidden>Übernehmen</button>
     <button id="extend-btn" hidden>Weiter suchen</button>
+    <button id="steps-btn" disabled>Lösungsweg</button>
     <button id="print-btn" disabled>Drucken</button>
     <p class="controls-hint">Es wird einige Sekunden lang nach einem möglichst hinweisarmen,
       eindeutig per Logik lösbaren Rätsel gesucht — je weniger Hinweise, desto schwerer.
@@ -145,7 +171,17 @@
       <h3>Besonderheiten der Spalten:</h3>
       <ol id="col-hints"></ol>
     </div>
-    <table id="grid"></table>
+    <div class="solve-area">
+      <table id="grid"></table>
+      <ol id="step-list" hidden></ol>
+    </div>
+    <div class="step-controls" id="step-controls" hidden>
+      <button id="step-prev">‹ Zurück</button>
+      <button id="step-play">▶ Abspielen</button>
+      <button id="step-next">Weiter ›</button>
+      <button id="step-reset">↺ Zurücksetzen</button>
+      <span id="step-counter"></span>
+    </div>
     <div class="solution-code" id="code-block" hidden>
       <div class="code-text">
         <strong>Lösungscode:</strong> <span id="code" class="code-value">—</span>
@@ -978,6 +1014,8 @@ function startSearch(budgetMs, fresh) {
   el("accept-btn").hidden = false;
   el("progress").hidden = false;
   el("error").textContent = "";
+  el("steps-btn").disabled = true;
+  exitStepMode();
   if (fresh) el("puzzle").hidden = true; // don't show a stale puzzle while searching
   updateSearchStatus();
 
@@ -1002,6 +1040,7 @@ function finishSearch() {
   currentPuzzle = { grid: globalBest.grid, clues: globalBest.clues, code, clueCount: globalBest.clueCount };
   renderPuzzle(currentPuzzle);
   el("print-btn").disabled = false;
+  el("steps-btn").disabled = false;
   el("extend-btn").hidden = false; // offer to search for an even sparser puzzle
 }
 
@@ -1074,6 +1113,7 @@ function renderPuzzle(p) {
 
 function showSolution(grid) {
   ensureGridTable();
+  document.getElementById("grid").classList.remove("pencil");
   document.getElementById("puzzle").hidden = false;
   document.getElementById("hints-block").hidden = !currentPuzzle;
   document.getElementById("code-block").hidden = !currentPuzzle;
@@ -1088,11 +1128,283 @@ function clearGridCells() {
   for (const td of cells) td.textContent = "";
 }
 function hideSolution() {
+  exitStepMode();
   clearGridCells();
   if (!currentPuzzle) {
     document.getElementById("puzzle").hidden = true;
   }
 }
+
+// === Lösungsweg: Schritt-für-Schritt-Solver (Trace) ===
+// Eigenständige, tracende Variante von logicalSolve (Worker). Gleiche Regeln,
+// aber sie protokolliert pro Zelle den Schritt + Grund. Liefert die Lösung
+// allein aus den Clues — sie wird NIE aus currentPuzzle.grid abgelesen.
+function solveWithTrace(clues) {
+  const FULL = 0x1FF;
+  const rowLabel = r => "Reihe " + ROW_LABELS[r];
+  const colLabel = c => "Spalte " + COL_LABELS[c];
+  function clueCellList(cl) {
+    if (cl.type === "pairSum") return cl.cells.map(([r, c]) => r * N + c);
+    const cells = [];
+    if (cl.scope === "row") { for (let c = 0; c < N; c++) cells.push(cl.index * N + c); }
+    else { for (let r = 0; r < N; r++) cells.push(r * N + cl.index); }
+    return cells;
+  }
+  const rowDup = new Array(N).fill(0), colDup = new Array(N).fill(0);
+  const pairs = [], totals = [], seqs = [];
+  function reg(cl) {
+    if (cl.type === "duplicate") {
+      if (cl.scope === "row") rowDup[cl.index] |= 1 << (cl.value - 1); else colDup[cl.index] |= 1 << (cl.value - 1);
+    } else if (cl.type === "pairSum") {
+      pairs.push({ a: cl.cells[0][0] * N + cl.cells[0][1], b: cl.cells[1][0] * N + cl.cells[1][1], value: cl.value });
+    } else if (cl.type === "totalSum") {
+      totals.push({ cells: clueCellList(cl), value: cl.value, scope: cl.scope, index: cl.index });
+    } else if (cl.type === "directSequence" || cl.type === "ascending" || cl.type === "descending") {
+      seqs.push({ cells: clueCellList(cl), type: cl.type, scope: cl.scope, index: cl.index });
+    }
+  }
+  for (let r = 0; r < N; r++) for (const cl of clues.rowClues[r]) reg(cl);
+  for (let c = 0; c < N; c++) for (const cl of clues.colClues[c]) reg(cl);
+
+  const domains = new Array(N * N).fill(FULL);
+  const steps = [];                 // each: { reason, removals:[{idx,vals}], solved:[idx] }
+  let bad = false, cur = null;      // cur = Map idx -> removed-bitmask for the in-progress step
+
+  const bit = v => 1 << (v - 1);
+  const isSingle = idx => { const d = domains[idx]; return d !== 0 && (d & (d - 1)) === 0; };
+  const valOf = idx => { const d = domains[idx]; for (let v = 1; v <= 9; v++) if (d & bit(v)) return v; return 0; };
+  const minV = m => { for (let v = 1; v <= 9; v++) if (m & bit(v)) return v; return 0; };
+  const maxV = m => { for (let v = 9; v >= 1; v--) if (m & bit(v)) return v; return 0; };
+  const cl2 = idx => cellLabel((idx / N) | 0, idx % N);
+  function rmBit(idx, v) {
+    if (domains[idx] & bit(v)) { domains[idx] &= ~bit(v); cur.set(idx, (cur.get(idx) || 0) | bit(v)); if (domains[idx] === 0) bad = true; }
+  }
+  function keep(idx, mask) {
+    const removed = domains[idx] & ~mask;
+    if (removed) { domains[idx] &= mask; cur.set(idx, (cur.get(idx) || 0) | removed); if (domains[idx] === 0) bad = true; }
+  }
+  function begin() { cur = new Map(); }
+  function commit(reason) {
+    if (cur && cur.size) {
+      const removals = [], solved = [];
+      for (const [idx, mask] of cur) {
+        const vals = []; for (let v = 1; v <= 9; v++) if (mask & bit(v)) vals.push(v);
+        removals.push({ idx, vals });
+        if (isSingle(idx)) solved.push(idx);
+      }
+      steps.push({ reason, removals, solved });
+    }
+    cur = null;
+  }
+  function unit(getIdx, dupMask, label) {
+    for (let v = 1; v <= 9 && !bad; v++) {
+      const b = bit(v), isDup = (dupMask & b) !== 0, maxC = isDup ? 2 : 1;
+      let single = 0; const open = [], fixedAt = [];
+      for (let k = 0; k < N; k++) { const idx = getIdx(k); if (domains[idx] & b) { if (isSingle(idx)) { single++; fixedAt.push(idx); } else open.push(idx); } }
+      if (single > maxC) { bad = true; return; }
+      if (single >= maxC && open.length) {
+        begin(); for (const idx of open) rmBit(idx, v);
+        commit("Die " + v + " steht in " + fixedAt.map(cl2).join(" und ") + " ⇒ keine weitere " + v + " in " + label);
+      } else if (isDup && single < maxC) {
+        if (single + open.length < maxC) { bad = true; return; }
+        if (open.length === maxC - single) {
+          begin(); for (const idx of open) keep(idx, b);
+          commit("Die doppelte " + v + " passt in " + label + " nur noch in " + open.map(cl2).join(", "));
+        }
+      }
+    }
+  }
+
+  // Propagation bis zum Fixpunkt. Jede Regelanwendung, die mindestens einen
+  // Kandidaten entfernt, ergibt EINEN Schritt (mit Begründung + entfernten Werten).
+  let guard = 0;
+  while (!bad && guard++ < 400) {
+    const before = steps.length;
+    // 1. Adjazenz
+    for (let r = 0; r < N && !bad; r++) for (let c = 0; c < N; c++) {
+      const idx = r * N + c; if (!isSingle(idx)) continue; const v = valOf(idx);
+      begin();
+      if (r > 0) rmBit((r - 1) * N + c, v);
+      if (r < N - 1) rmBit((r + 1) * N + c, v);
+      if (c > 0) rmBit(r * N + c - 1, v);
+      if (c < N - 1) rmBit(r * N + c + 1, v);
+      commit(cl2(idx) + " = " + v + ": gleiche Zahlen nie direkt benachbart ⇒ " + v + " raus aus den Nachbarn");
+    }
+    if (bad) break;
+    // 2. Distinktheit / Dup-Hidden je Reihe, dann Spalte
+    for (let r = 0; r < N && !bad; r++) unit(k => r * N + k, rowDup[r], rowLabel(r));
+    if (bad) break;
+    for (let c = 0; c < N && !bad; c++) unit(k => k * N + c, colDup[c], colLabel(c));
+    if (bad) break;
+    // 3. Globale Zählung: jede Zahl genau 4×
+    for (let v = 1; v <= 9 && !bad; v++) {
+      const b = bit(v); let single = 0; const open = [];
+      for (let i = 0; i < N * N; i++) if (domains[i] & b) { if (isSingle(i)) single++; else open.push(i); }
+      if (single > 4 || single + open.length < 4) { bad = true; break; }
+      if (single >= 4 && open.length) { begin(); for (const idx of open) rmBit(idx, v); commit("Die " + v + " kommt bereits 4× vor ⇒ überall sonst raus"); }
+    }
+    if (bad) break;
+    // 4. pairSum: A + B = S
+    for (const p of pairs) {
+      const da = domains[p.a], db = domains[p.b]; let mA = 0, mB = 0;
+      for (let v = 1; v <= 9; v++) { const w = p.value - v; if (w < 1 || w > 9) continue; if ((da & bit(v)) && (db & bit(w))) { mA |= bit(v); mB |= bit(w); } }
+      begin(); keep(p.a, mA); keep(p.b, mB);
+      commit(cl2(p.a) + " + " + cl2(p.b) + " = " + p.value + ": nur Werte mit passendem Partner bleiben");
+      if (bad) break;
+    }
+    if (bad) break;
+    // 5. totalSum: Summe einer Reihe/Spalte
+    for (const t of totals) {
+      const cells = t.cells; begin();
+      for (let k = 0; k < cells.length; k++) {
+        let minO = 0, maxO = 0;
+        for (let j = 0; j < cells.length; j++) { if (j === k) continue; minO += minV(domains[cells[j]]); maxO += maxV(domains[cells[j]]); }
+        const lo = t.value - maxO, hi = t.value - minO;
+        let mask = 0; for (let v = Math.max(1, lo); v <= Math.min(9, hi); v++) mask |= bit(v);
+        keep(cells[k], mask);
+      }
+      commit("Summe von " + (t.scope === "row" ? rowLabel(t.index) : colLabel(t.index)) + " = " + t.value + " ⇒ Wertebereiche eingegrenzt");
+      if (bad) break;
+    }
+    if (bad) break;
+    // 6. Sequenzen
+    for (const s of seqs) {
+      const cells = s.cells;
+      const word = s.type === "directSequence" ? "direkt aufeinanderfolgend" : (s.type === "ascending" ? "aufsteigend" : "absteigend");
+      begin();
+      if (s.type === "directSequence") {
+        for (let k = 0; k < cells.length - 1; k++) { keep(cells[k + 1], (domains[cells[k]] << 1) & FULL); keep(cells[k], domains[cells[k + 1]] >> 1); }
+      } else if (s.type === "ascending") {
+        for (let k = 0; k < cells.length - 1; k++) { const mn = minV(domains[cells[k]]); let m1 = 0; for (let v = mn + 1; v <= 9; v++) m1 |= bit(v); keep(cells[k + 1], m1); const mx = maxV(domains[cells[k + 1]]); let m2 = 0; for (let v = 1; v <= mx - 1; v++) m2 |= bit(v); keep(cells[k], m2); }
+      } else {
+        for (let k = 0; k < cells.length - 1; k++) { const mx = maxV(domains[cells[k]]); let m1 = 0; for (let v = 1; v <= mx - 1; v++) m1 |= bit(v); keep(cells[k + 1], m1); const mn = minV(domains[cells[k + 1]]); let m2 = 0; for (let v = mn + 1; v <= 9; v++) m2 |= bit(v); keep(cells[k], m2); }
+      }
+      commit((s.scope === "row" ? rowLabel(s.index) : colLabel(s.index)) + ": Zahlen " + word + " ⇒ Werte eingegrenzt");
+      if (bad) break;
+    }
+    if (bad) break;
+    if (steps.length === before) break; // Fixpunkt erreicht
+  }
+
+  let solved = !bad;
+  if (solved) for (let i = 0; i < N * N; i++) if (!isSingle(i)) { solved = false; break; }
+  const grid = Array.from({ length: N }, () => Array(N).fill(0));
+  if (solved) for (let i = 0; i < N * N; i++) grid[(i / N) | 0][i % N] = valOf(i);
+  return { solved, steps, grid };
+}
+
+// === Lösungsweg: Schritt-Modus (UI) ===
+let stepMode = false, stepTrace = null, stepIndex = 0, stepTimer = null;
+
+function gridsMatch(a, b) {
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) if (a[r][c] !== b[r][c]) return false;
+  return true;
+}
+function enterStepMode() {
+  if (!currentPuzzle || !currentPuzzle.clues) return;
+  if (!currentPuzzle.trace) currentPuzzle.trace = solveWithTrace(currentPuzzle.clues);
+  const tr = currentPuzzle.trace;
+  if (!tr.solved || !gridsMatch(tr.grid, currentPuzzle.grid)) {
+    // Sicherheitsnetz (sollte nie eintreten): kein Schritt-Modus, Lösung direkt zeigen.
+    showSolution(currentPuzzle.grid);
+    return;
+  }
+  stepTrace = tr; stepMode = true; stepIndex = 0;
+  document.getElementById("puzzle").hidden = false;
+  el("step-list").hidden = false;
+  el("step-controls").hidden = false;
+  el("steps-btn").textContent = "Lösungsweg ausblenden";
+  renderStep();
+}
+// Kandidaten-Bitmasken nach Anwendung der ersten `upto` Schritte.
+function stepCandidates(upto) {
+  const dom = new Array(N * N).fill(0x1FF);
+  for (let i = 0; i < upto; i++) for (const rm of stepTrace.steps[i].removals) {
+    let mask = 0; for (const v of rm.vals) mask |= 1 << (v - 1);
+    dom[rm.idx] &= ~mask;
+  }
+  return dom;
+}
+function renderStep() {
+  ensureGridTable();
+  const grid = document.getElementById("grid");
+  grid.classList.add("pencil");
+  const lab = idx => cellLabel((idx / N) | 0, idx % N);
+  const dom = stepCandidates(stepIndex);
+  const step = stepIndex > 0 ? stepTrace.steps[stepIndex - 1] : null;
+  const removedThis = new Map(), solvedThis = new Set(), changed = new Set();
+  if (step) {
+    for (const rm of step.removals) { removedThis.set(rm.idx, rm.vals); changed.add(rm.idx); }
+    for (const idx of step.solved) solvedThis.add(idx);
+  }
+  grid.querySelectorAll("td").forEach(td => {
+    const idx = (+td.dataset.r) * N + (+td.dataset.c);
+    td.classList.remove("changed", "solved-now");
+    const d = dom[idx];
+    let count = 0, t = d; while (t) { count++; t &= t - 1; }
+    if (count === 1) {
+      let v = 1; while (!(d & (1 << (v - 1)))) v++;
+      td.innerHTML = '<div class="solved">' + v + '</div>';
+    } else {
+      const rem = removedThis.get(idx) || [];
+      let html = '<div class="cands">';
+      for (let v = 1; v <= 9; v++) {
+        if (d & (1 << (v - 1))) html += '<span>' + v + '</span>';
+        else if (rem.indexOf(v) >= 0) html += '<span class="removed">' + v + '</span>';
+        else html += '<span></span>';
+      }
+      td.innerHTML = html + '</div>';
+    }
+    if (changed.has(idx)) td.classList.add(solvedThis.has(idx) ? "solved-now" : "changed");
+  });
+  const list = el("step-list");
+  list.innerHTML = "";
+  for (let i = 0; i < stepIndex; i++) {
+    const s = stepTrace.steps[i];
+    const detail = s.removals.map(rm => lab(rm.idx) + ": −" + rm.vals.join("")).join(", ");
+    const li = document.createElement("li");
+    li.dataset.step = i + 1;
+    li.innerHTML = `<b>${s.reason}</b><br><span class="stp-detail">${detail}</span>`;
+    if (i === stepIndex - 1) li.classList.add("current");
+    list.appendChild(li);
+  }
+  const cur = list.querySelector("li.current");
+  if (cur) cur.scrollIntoView({ block: "nearest" });
+  el("step-counter").textContent = `Schritt ${stepIndex} / ${stepTrace.steps.length}`;
+  el("step-prev").disabled = stepIndex <= 0;
+  el("step-next").disabled = stepIndex >= stepTrace.steps.length;
+}
+function stepNext() { if (stepTrace && stepIndex < stepTrace.steps.length) { stepIndex++; renderStep(); } if (stepTrace && stepIndex >= stepTrace.steps.length) stopPlay(); }
+function stepPrev() { if (stepTrace && stepIndex > 0) { stepIndex--; renderStep(); } }
+function stepReset() { stopPlay(); stepIndex = 0; renderStep(); }
+function startPlay() {
+  if (stepTimer || !stepTrace) return;
+  if (stepIndex >= stepTrace.steps.length) stepIndex = 0;
+  el("step-play").textContent = "⏸ Pause";
+  stepTimer = setInterval(() => {
+    if (!stepTrace || stepIndex >= stepTrace.steps.length) { stopPlay(); return; }
+    stepIndex++; renderStep();
+  }, 400);
+}
+function stopPlay() {
+  if (stepTimer) { clearInterval(stepTimer); stepTimer = null; }
+  const b = document.getElementById("step-play"); if (b) b.textContent = "▶ Abspielen";
+}
+function togglePlay() { if (stepTimer) stopPlay(); else startPlay(); }
+function exitStepMode() {
+  stopPlay();
+  stepMode = false; stepTrace = null; stepIndex = 0;
+  const list = document.getElementById("step-list"); if (list) list.hidden = true;
+  const ctrl = document.getElementById("step-controls"); if (ctrl) ctrl.hidden = true;
+  const stepsBtn = document.getElementById("steps-btn"); if (stepsBtn) stepsBtn.textContent = "Lösungsweg";
+  const grid = document.getElementById("grid");
+  if (grid) {
+    grid.classList.remove("pencil");
+    grid.querySelectorAll("td").forEach(td => td.classList.remove("changed", "solved-now"));
+  }
+  clearGridCells();
+}
+function toggleSteps() { if (stepMode) exitStepMode(); else enterStepMode(); }
 
 document.getElementById("generate-btn").addEventListener("click", newSearch);
 document.getElementById("accept-btn").addEventListener("click", acceptNow);
@@ -1103,6 +1415,7 @@ document.getElementById("reveal-btn").addEventListener("click", () => {
   const err = document.getElementById("error");
   if (!grid) { err.textContent = "Code ungültig."; return; }
   err.textContent = "";
+  exitStepMode();
   showSolution(grid);
 });
 document.getElementById("hide-btn").addEventListener("click", () => {
@@ -1110,6 +1423,16 @@ document.getElementById("hide-btn").addEventListener("click", () => {
   document.getElementById("error").textContent = "";
 });
 document.getElementById("print-btn").addEventListener("click", () => window.print());
+document.getElementById("steps-btn").addEventListener("click", toggleSteps);
+document.getElementById("step-prev").addEventListener("click", stepPrev);
+document.getElementById("step-next").addEventListener("click", stepNext);
+document.getElementById("step-reset").addEventListener("click", stepReset);
+document.getElementById("step-play").addEventListener("click", togglePlay);
+document.getElementById("step-list").addEventListener("click", (e) => {
+  const li = e.target.closest("li"); if (!li) return;
+  const k = parseInt(li.dataset.step, 10); if (!k) return;
+  stopPlay(); stepIndex = k; renderStep();
+});
 
 // If URL contains ?code=…, auto-fill and reveal the solution
 (function applyCodeFromUrl() {

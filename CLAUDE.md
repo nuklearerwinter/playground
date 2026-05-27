@@ -59,17 +59,31 @@ Architectural points that are non-obvious from the code:
   loops forever, generating + minimising and posting a puzzle only when it
   beats its fewest-clue count so far; the main thread runs ~4 such workers as
   a **time-budget tournament** (`startSearch`/`searchTick`/`finishSearch`),
-  keeps the global minimum, shows it live, and stops at the budget (~6 s),
-  on a plateau, or on "Übernehmen". "Weiter suchen" extends by +10 s. Fewer
-  clues ⇒ harder. Workers are stopped via `terminate()` (the loop has no exit).
+  keeps the global minimum, shows it live, and runs the full budget (~6 s) or
+  until "Übernehmen". "Weiter suchen" extends by +10 s. Fewer clues ⇒ harder.
+  Workers are stopped via `terminate()` (the loop has no exit).
 - **Grid generation injects sequences first.** Random fills almost never
   produce sequence lines (`directSequence`/`ascending`/`descending`), so the
-  generator pre-fixes 1–3 lines (the worker picks the count at random per
-  attempt) as sequences before backtracking the rest. `pickClues` never
-  removes sequence clues, so every emitted puzzle keeps ≥1 for variety.
+  generator pre-fixes 0–3 lines (count from config / random) as sequences
+  before backtracking the rest; `pickClues` protects up to `cfg.numSequences`
+  of them (see the clue-config bullet above).
 - **The solution code is a 31-char Crockford-Base32 string with an 8-bit
   checksum.** If you change the grid size or value range, the code format
   has to change too (`encodeGrid`/`decodeCode` in the main thread).
+- **Step-by-step solution view (`solveWithTrace`).** A main-thread mirror of
+  `logicalSolve` that solves from the **clues only** (never reads
+  `currentPuzzle.grid`) and records each rule application as a step
+  `{ reason, removals:[{idx,vals}], solved:[idx] }` — i.e. *which candidates got
+  eliminated and why*, not just final cell placements (~100–120 steps/puzzle).
+  The UI (`enterStepMode`/`renderStep`/`stepNext`/…) shows **Sudoku-style
+  candidate pencil-marks** per cell (`td.pencil .cands`); `renderStep` replays
+  `removals` onto full domains to get the candidate state at any step, struck-
+  out for the current step, and a running clickable step list with reasons.
+  **`solveWithTrace` must mirror `logicalSolve`'s rules** — change both
+  together; a safety net falls back to a plain reveal if its grid ≠ the known
+  solution. Validate with a Node copy (extract by brace-matching;
+  `/tmp/lt/trace.js`: assert solved, replayed removals == solution, no removal
+  of an absent value, no emptied domain).
 
 ## Running and testing
 
