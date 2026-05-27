@@ -40,11 +40,21 @@ Architectural points that are non-obvious from the code:
   hidden-single reasoning is valid only for the duplicate value (exactly 2×)
   and globally (each value exactly 4×).
 - **Clue selection minimises; `pickClues` is always called with
-  `{ targetClues: 0 }`.** Start with all candidate clues (gated by
+  `{ targetClues: 0, ... }`.** Start with all candidate clues (gated by
   `logicalSolve`), greedily remove while still deducible (fullest lines first,
   totalSum before pairSum). That removes totalSum hints almost entirely and
   yields ~11–20 clues depending on luck. The `targetClues > 0` rebalance path
   still exists but is unused by the app.
+- **Configurable clue types via a `keep` flag.** A collapsible settings panel
+  feeds a config (`readConfig`) that the main thread sends to every worker and
+  reuses on "Weiter suchen": `numSequences` (`"random"` or 0–3), `minTotalSum`
+  (0–3), `maxDupLines` (0–5). `pickClues` marks up to that many sequence and
+  totalSum clues with `keep`; kept clues (like mandatory duplicates) are never
+  removed. **Sequences are NOT auto-protected anymore** — only the marked ones
+  are, so coincidental sequence lines from the random fill get minimised away
+  and the shown count matches the setting (rarely +1 if load-bearing).
+  `maxDupLines` is passed to `generateGrid`/`gridQualityOK`. `pairSum` is
+  deliberately not configurable (it's the deducibility backbone).
 - **Difficulty = clue count = search time (no fixed presets).** The worker
   loops forever, generating + minimising and posting a puzzle only when it
   beats its fewest-clue count so far; the main thread runs ~4 such workers as

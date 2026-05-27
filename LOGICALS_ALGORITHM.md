@@ -166,9 +166,10 @@ Es gibt **keine festen Schwierigkeitsstufen** mehr. Stattdessen bestimmt die
 
 Worker-Schleife (`self.onmessage`, läuft endlos bis `terminate()`):
 
-1. zufällig 1–3 Sequenzen wählen (Variety; jedes Rätsel hat ≥ 1 Sequenz),
-   Gitter erzeugen,
-2. `pickClues(grid, { targetClues: 0 })` → minimales deduzierbares Set,
+1. Sequenzanzahl bestimmen (laut Config oder zufällig 1–3), Gitter erzeugen
+   (`generateGrid(numSeq, maxDupLines)`),
+2. `pickClues(grid, { targetClues: 0, numSequences, minTotalSum })` →
+   minimales deduzierbares Set unter Beachtung der erzwungenen Typen,
 3. nur posten, wenn die Hinweiszahl unter dem bisher besten Wert liegt
    (`threshold` erlaubt, bei „Weiter suchen" nur echte Verbesserungen zu
    melden).
@@ -185,6 +186,29 @@ Hauptthread (`startSearch` / `searchTick` / `finishSearch`):
 
 Mehr Suchzeit ⇒ weniger Hinweise ⇒ schwerer. Die Hinweiszahl wird am Rätsel
 und im Druck angezeigt.
+
+### Konfigurierbare Hinweis-Typen
+
+Ein einklappbares „Einstellungen"-Feld liefert eine Config, die der Hauptthread
+(`readConfig`) je Suche an alle Worker schickt (bei „Weiter suchen" wird
+dieselbe Config wiederverwendet):
+
+- **`numSequences`** (`zufällig` oder 0–3): so viele Sequenz-Linien werden ins
+  Gitter eingestreut **und** in `pickClues` geschützt. Der Zufallsfüller
+  erzeugt gelegentlich *zusätzliche* Sequenz-Linien; da `pickClues` nur N
+  Sequenzen schützt und der Rest entfernbar ist, entspricht die angezeigte
+  Anzahl der Einstellung (selten +1, falls eine zufällige Sequenz für die
+  Deduzierbarkeit gebraucht wird).
+- **`minTotalSum`** (0–3): so viele `totalSum`-Hinweise werden geschützt
+  (sonst entfernt die Minimierung sie praktisch immer). Kostet je ~1 Hinweis.
+- **`maxDupLines`** (0–5): Obergrenze für Dopplungslinien im Gitter
+  (`gridQualityOK`). 0 = nie „kommt doppelt vor".
+
+Geschützte Hinweise tragen in `pickClues` ein `keep`-Flag und werden — wie
+Mandatory-Duplikate — nicht entfernt. `pairSum` ist bewusst nicht
+konfigurierbar (Rückgrat der Lösbarkeit; die Minimierung lässt genau die
+nötige Menge übrig). Strenge Kombinationen (viele Sequenzen, erzwungene
+totalSums, wenige Dopplungen) senken die Trefferquote der Gittererzeugung.
 
 ## Performance
 
