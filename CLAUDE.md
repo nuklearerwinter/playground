@@ -39,17 +39,24 @@ Architectural points that are non-obvious from the code:
   values, so there is **no** per-line "every value appears" lower bound —
   hidden-single reasoning is valid only for the duplicate value (exactly 2×)
   and globally (each value exactly 4×).
-- **Clue selection: REDUCE fully, then rebalance up.** Start with all
-  candidate clues (gated by `logicalSolve`), greedily remove while still
-  deducible (fullest lines first, totalSum before pairSum), then for easier
-  levels add clues back onto the emptiest lines up to `cfg.targetClues`.
-  Deducibility needs redundancy, so lines carry ~3–4 clues (sometimes 5),
-  not the 2–3 of earlier versions. `totalSum` is capped at 5 per puzzle.
+- **Clue selection minimises; `pickClues` is always called with
+  `{ targetClues: 0 }`.** Start with all candidate clues (gated by
+  `logicalSolve`), greedily remove while still deducible (fullest lines first,
+  totalSum before pairSum). That removes totalSum hints almost entirely and
+  yields ~11–20 clues depending on luck. The `targetClues > 0` rebalance path
+  still exists but is unused by the app.
+- **Difficulty = clue count = search time (no fixed presets).** The worker
+  loops forever, generating + minimising and posting a puzzle only when it
+  beats its fewest-clue count so far; the main thread runs ~4 such workers as
+  a **time-budget tournament** (`startSearch`/`searchTick`/`finishSearch`),
+  keeps the global minimum, shows it live, and stops at the budget (~6 s),
+  on a plateau, or on "Übernehmen". "Weiter suchen" extends by +10 s. Fewer
+  clues ⇒ harder. Workers are stopped via `terminate()` (the loop has no exit).
 - **Grid generation injects sequences first.** Random fills almost never
-  produce sequence lines (`directSequence`/`ascending`/`descending`), so
-  the generator pre-fixes 1–3 lines as sequences before backtracking the
-  rest. Difficulty is parameterised on `numSequences` and `targetClues`
-  (higher target ⇒ more redundant clues ⇒ easier).
+  produce sequence lines (`directSequence`/`ascending`/`descending`), so the
+  generator pre-fixes 1–3 lines (the worker picks the count at random per
+  attempt) as sequences before backtracking the rest. `pickClues` never
+  removes sequence clues, so every emitted puzzle keeps ≥1 for variety.
 - **The solution code is a 31-char Crockford-Base32 string with an 8-bit
   checksum.** If you change the grid size or value range, the code format
   has to change too (`encodeGrid`/`decodeCode` in the main thread).
@@ -60,17 +67,20 @@ Architectural points that are non-obvious from the code:
   double-click). No server needed.
 - **No automated tests in-repo, but the worker logic is testable in Node.**
   Extract the `workerCode()` body (regex from `function workerCode() {` to the
-  `// === Main-thread` marker), wrap it in `new Function(..., "...; return {
-  generateGrid, pickClues, logicalSolve, buildCandidateClues, DIFFICULTY_CONFIG
-  };")`, and you can batch-generate puzzles headlessly. The critical assertions
-  when changing the generator/solver: for every emitted puzzle (a)
+  `// === Main-thread` marker), wrap it in `new Function("self", body + "; return {
+  generateGrid, pickClues, logicalSolve, buildCandidateClues };")`, and you can
+  batch-generate puzzles headlessly (mirror the worker: random `numSequences`
+  1–3, `pickClues(grid, {targetClues:0})`). The critical assertions when
+  changing the generator/solver: for every emitted puzzle (a)
   `logicalSolve(clues).solved` is true and (b) its returned grid **equals** the
   real grid (this checks soundness, and soundness ⇒ uniqueness). Also confirm
-  per-difficulty yield stays high and `totalSum` ≤ 5. In the browser, also
-  check hints render, print fits one A4 page, and the code round-trips.
-- **Performance baseline**: `logicalSolve` runs in ~5–9 ms per attempt, so the
-  first puzzle should appear near-instantly. If hard takes >5 s, something
-  regressed (e.g. a `logicalSolve` rule got weaker, tanking the yield).
+  yield stays high and every puzzle keeps a sequence. In the browser, also
+  check hints render, print fits one A4 page (incl. the clue count), and the
+  code round-trips. (Node is installed in this environment.)
+- **Performance baseline**: one minimise attempt runs in ~6 ms; the tournament
+  reaches ~11–12 clues in a few seconds with 4 workers. If a single attempt
+  takes much longer or yield collapses, something regressed (e.g. a
+  `logicalSolve` rule got weaker).
 
 ## Other apps
 

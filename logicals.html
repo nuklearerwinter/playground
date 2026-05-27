@@ -12,6 +12,7 @@
   .controls fieldset { border: 1px solid #bbb; border-radius: 4px; display: inline-block; padding: 0.2em 0.8em; margin-right: 0.8em; vertical-align: middle; }
   .controls label { display: inline-flex; align-items: center; gap: 0.3em; margin-right: 0.5em; }
   .controls label input[type="radio"] { margin: 0; }
+  .controls-hint { color: #666; font-size: 0.85em; margin: 0.6em 0 0; line-height: 1.4; }
   button { padding: 0.55em 1.1em; font-size: 1em; cursor: pointer; margin: 0.2em 0.2em; border-radius: 4px; border: 1.5px solid var(--accent); background: white; color: var(--accent); font-family: inherit; }
   button:hover:not(:disabled) { background: var(--accent); color: white; }
   button:disabled { opacity: 0.5; cursor: progress; }
@@ -73,14 +74,13 @@
   </header>
 
   <section class="controls" id="controls">
-    <fieldset>
-      <legend>Schwierigkeit</legend>
-      <label><input type="radio" name="difficulty" value="easy"> Leicht</label>
-      <label><input type="radio" name="difficulty" value="medium" checked> Mittel</label>
-      <label><input type="radio" name="difficulty" value="hard"> Schwer</label>
-    </fieldset>
     <button id="generate-btn">Neues Rätsel</button>
+    <button id="accept-btn" hidden>Übernehmen</button>
+    <button id="extend-btn" hidden>Weiter suchen</button>
     <button id="print-btn" disabled>Drucken</button>
+    <p class="controls-hint">Es wird einige Sekunden lang nach einem möglichst hinweisarmen,
+      eindeutig per Logik lösbaren Rätsel gesucht — je weniger Hinweise, desto schwerer.
+      Mit „Übernehmen" nehmen Sie jederzeit das aktuell beste, mit „Weiter suchen" suchen Sie nach einem noch knapperen.</p>
     <div id="progress" hidden>
       <progress id="progress-bar" max="100" value="0"></progress>
       <span id="status">Erzeuge Rätsel …</span>
@@ -88,7 +88,7 @@
   </section>
 
   <section id="puzzle" hidden>
-    <div class="difficulty-display" id="difficulty-display" hidden>Schwierigkeit: <span id="difficulty-label"></span></div>
+    <div class="difficulty-display" id="difficulty-display" hidden><span id="difficulty-label"></span></div>
     <div class="hints" id="hints-block" hidden>
       <h3>Besonderheiten der Reihen:</h3>
       <ol id="row-hints"></ol>
@@ -762,41 +762,39 @@ function workerCode() {
     return selected;
   }
 
-  // targetClues: greedy reduction stops once the clue count reaches this — a
-  // lower target means fewer clues and a harder puzzle. (Reduction never goes
-  // below what deducibility requires, so the real count can exceed the target
-  // for hard.) numSequences seeds visual variety; more sequences also make a
-  // puzzle easier, since a sequence line is highly determining.
-  const DIFFICULTY_CONFIG = {
-    easy:   { numSequences: 3, targetClues: 32, keepSequences: true },
-    medium: { numSequences: 2, targetClues: 27, keepSequences: true },
-    hard:   { numSequences: 1, targetClues: 0,  keepSequences: true },
-  };
+  function clueCountOf(clues) {
+    let n = 0;
+    for (const list of clues.rowClues) n += list.length;
+    for (const list of clues.colClues) n += list.length;
+    return n;
+  }
 
+  // Continuous minimisation loop. The worker keeps generating grids and
+  // reducing them to a minimal deducible clue set (`targetClues: 0` ⇒ no
+  // rebalancing), and posts a puzzle only when it beats the fewest-clue count
+  // seen so far (`best`). The main thread runs several of these in parallel
+  // for a time budget and keeps the global minimum; it terminates the workers
+  // when the budget elapses. `threshold` lets an extended search ignore
+  // anything not better than the puzzle already on screen.
   self.onmessage = function(e) {
-    const difficulty = e.data.difficulty;
-    const cfg = DIFFICULTY_CONFIG[difficulty] || DIFFICULTY_CONFIG.medium;
-    const maxAttempts = e.data.maxAttempts;
-    let progressBatch = 0;
-    const BATCH = 3;
-    for (let attempts = 0; attempts < maxAttempts; attempts++) {
-      progressBatch++;
-      const grid = generateGrid(cfg.numSequences);
+    let best = (e.data && typeof e.data.threshold === "number") ? e.data.threshold : Infinity;
+    let sinceTick = 0;
+    for (;;) {
+      sinceTick++;
+      const numSeq = 1 + ((Math.random() * 3) | 0); // 1–3 sequences for variety
+      const grid = generateGrid(numSeq);
       if (grid) {
-        const clues = pickClues(grid, cfg);
+        const clues = pickClues(grid, { targetClues: 0 });
         if (clues) {
-          self.postMessage({ type: "progress", delta: progressBatch });
-          self.postMessage({ type: "result", grid: grid, clues: clues });
-          return;
+          const cc = clueCountOf(clues);
+          if (cc < best) {
+            best = cc;
+            self.postMessage({ type: "candidate", grid: grid, clues: clues, clueCount: cc });
+          }
         }
       }
-      if (progressBatch >= BATCH) {
-        self.postMessage({ type: "progress", delta: progressBatch });
-        progressBatch = 0;
-      }
+      if (sinceTick >= 40) { self.postMessage({ type: "tick", attempts: sinceTick }); sinceTick = 0; }
     }
-    if (progressBatch > 0) self.postMessage({ type: "progress", delta: progressBatch });
-    self.postMessage({ type: "result", grid: null });
   };
 }
 
@@ -814,92 +812,118 @@ function getWorkerUrl() {
 let currentPuzzle = null;
 let activeWorkers = [];
 
-async function generate() {
-  const btn = document.getElementById("generate-btn");
-  const printBtn = document.getElementById("print-btn");
-  const progress = document.getElementById("progress");
-  const status = document.getElementById("status");
-  const errorEl = document.getElementById("error");
-  const progressBar = document.getElementById("progress-bar");
+// === Time-budget tournament ===
+// Several workers minimise clue counts in parallel; the main thread keeps the
+// global best (fewest clues), shows it live, and stops at a time budget (or
+// early on a plateau, or when the user clicks "Übernehmen").
+const DEFAULT_BUDGET_MS = 6000;
+const EXTEND_MS = 10000;
+const STALL_MS = 2500; // stop early if no improvement for this long…
+const MIN_MS = 3000;   // …but never before this much has elapsed
 
-  activeWorkers.forEach(w => { try { w.terminate(); } catch(_){} });
+let globalBest = null;   // { grid, clues, clueCount }
+let searchTimer = null;
+let searchStart = 0, searchDeadline = 0, lastImproveAt = 0, totalAttempts = 0;
+let searching = false;
+
+function el(id) { return document.getElementById(id); }
+function killWorkers() {
+  activeWorkers.forEach(w => { try { w.terminate(); } catch (_){} });
   activeWorkers = [];
+}
 
-  btn.disabled = true;
-  printBtn.disabled = true;
-  progress.hidden = false;
-  errorEl.textContent = "";
+function updateSearchStatus() {
+  const now = Date.now();
+  const span = searchDeadline - searchStart;
+  const bar = el("progress-bar");
+  bar.max = 1000;
+  bar.value = span > 0 ? Math.round(Math.min(1, (now - searchStart) / span) * 1000) : 0;
+  const best = globalBest ? `${globalBest.clueCount} Hinweise` : "suche …";
+  const secs = Math.max(0, Math.ceil((searchDeadline - now) / 1000));
+  el("status").textContent = `Bestes Rätsel: ${best} · ${totalAttempts} Versuche · noch ${secs}s`;
+}
 
-  const difficulty = document.querySelector('input[name="difficulty"]:checked').value;
-  const NUM_WORKERS = Math.max(1, Math.min(navigator.hardwareConcurrency || 2, 4));
-  const PER_WORKER = 400;
-  const TOTAL_MAX = NUM_WORKERS * PER_WORKER;
-
-  progressBar.max = TOTAL_MAX;
-  progressBar.value = 0;
-  status.textContent = `Suche nach einem eindeutigen Rätsel … (${NUM_WORKERS} parallele Threads)`;
-
-  const url = getWorkerUrl();
-
-  const result = await new Promise((resolve) => {
-    let resolved = false;
-    let completed = 0;
-    let totalProgress = 0;
-
-    for (let i = 0; i < NUM_WORKERS; i++) {
-      let w;
-      try { w = new Worker(url); }
-      catch (err) {
-        console.error("Worker konnte nicht gestartet werden:", err);
-        completed++;
-        if (completed === NUM_WORKERS && !resolved) { resolved = true; resolve(null); }
-        continue;
-      }
-      activeWorkers.push(w);
-      w.onmessage = (e) => {
-        if (resolved) return;
-        if (e.data.type === "progress") {
-          totalProgress += e.data.delta;
-          progressBar.value = Math.min(totalProgress, TOTAL_MAX);
-        } else if (e.data.type === "result") {
-          if (e.data.grid) {
-            resolved = true;
-            resolve({ grid: e.data.grid, clues: e.data.clues });
-          } else {
-            completed++;
-            if (completed === NUM_WORKERS) { resolved = true; resolve(null); }
-          }
-        }
-      };
-      w.onerror = (err) => {
-        console.error("Worker error:", err);
-        if (!resolved) {
-          completed++;
-          if (completed === NUM_WORKERS) { resolved = true; resolve(null); }
-        }
-      };
-      w.postMessage({ difficulty: difficulty, maxAttempts: PER_WORKER });
+function onWorkerMessage(e) {
+  if (!searching) return;
+  const d = e.data;
+  if (d.type === "tick") {
+    totalAttempts += d.attempts;
+  } else if (d.type === "candidate") {
+    if (!globalBest || d.clueCount < globalBest.clueCount) {
+      globalBest = { grid: d.grid, clues: d.clues, clueCount: d.clueCount };
+      lastImproveAt = Date.now();
+      updateSearchStatus();
     }
-  });
+  }
+}
 
-  activeWorkers.forEach(w => { try { w.terminate(); } catch(_){} });
-  activeWorkers = [];
+function spawnWorkers() {
+  const url = getWorkerUrl();
+  const n = Math.max(1, Math.min(navigator.hardwareConcurrency || 2, 4));
+  const threshold = globalBest ? globalBest.clueCount : null;
+  for (let i = 0; i < n; i++) {
+    let w;
+    try { w = new Worker(url); }
+    catch (err) { console.error("Worker konnte nicht gestartet werden:", err); continue; }
+    w.onmessage = onWorkerMessage;
+    w.onerror = (err) => console.error("Worker error:", err);
+    w.postMessage(threshold !== null ? { threshold } : {});
+    activeWorkers.push(w);
+  }
+}
 
-  if (!result) {
-    status.textContent = "";
-    progress.hidden = true;
-    btn.disabled = false;
-    errorEl.textContent = `Kein eindeutiges Rätsel gefunden. Bitte „Neues Rätsel" erneut versuchen.`;
+function searchTick() {
+  const now = Date.now();
+  updateSearchStatus();
+  const stalled = globalBest && (now - lastImproveAt) > STALL_MS && (now - searchStart) > MIN_MS;
+  if (now >= searchDeadline || stalled) finishSearch();
+}
+
+function startSearch(budgetMs, fresh) {
+  if (fresh) globalBest = null;
+  killWorkers();
+  searching = true;
+  totalAttempts = 0;
+  searchStart = Date.now();
+  searchDeadline = searchStart + budgetMs;
+  lastImproveAt = searchStart;
+
+  el("generate-btn").disabled = true;
+  el("print-btn").disabled = true;
+  el("extend-btn").hidden = true;
+  el("accept-btn").hidden = false;
+  el("progress").hidden = false;
+  el("error").textContent = "";
+  if (fresh) el("puzzle").hidden = true; // don't show a stale puzzle while searching
+  updateSearchStatus();
+
+  spawnWorkers();
+  searchTimer = setInterval(searchTick, 120);
+}
+
+function finishSearch() {
+  if (!searching) return;
+  searching = false;
+  if (searchTimer) { clearInterval(searchTimer); searchTimer = null; }
+  killWorkers();
+  el("progress").hidden = true;
+  el("accept-btn").hidden = true;
+  el("generate-btn").disabled = false;
+
+  if (!globalBest) {
+    el("error").textContent = `Kein lösbares Rätsel gefunden. Bitte „Neues Rätsel" erneut versuchen.`;
     return;
   }
-
-  const code = encodeGrid(result.grid);
-  currentPuzzle = { grid: result.grid, clues: result.clues, code, difficulty };
+  const code = encodeGrid(globalBest.grid);
+  currentPuzzle = { grid: globalBest.grid, clues: globalBest.clues, code, clueCount: globalBest.clueCount };
   renderPuzzle(currentPuzzle);
-  progress.hidden = true;
-  btn.disabled = false;
-  printBtn.disabled = false;
+  el("print-btn").disabled = false;
+  el("extend-btn").hidden = false; // offer to search for an even sparser puzzle
 }
+
+function newSearch() { startSearch(DEFAULT_BUDGET_MS, true); }
+function acceptNow() { if (globalBest) finishSearch(); } // ignore until first candidate
+function extendSearch() { if (!searching && globalBest) startSearch(EXTEND_MS, false); }
 
 function buildGridTable() {
   const tbl = document.getElementById("grid");
@@ -932,14 +956,12 @@ function ensureGridTable() {
   if (!tbl.children.length) buildGridTable();
 }
 
-const DIFFICULTY_LABELS = { easy: "Leicht", medium: "Mittel", hard: "Schwer" };
-
 function renderPuzzle(p) {
   document.getElementById("puzzle").hidden = false;
   document.getElementById("hints-block").hidden = false;
   document.getElementById("code-block").hidden = false;
   document.getElementById("difficulty-display").hidden = false;
-  document.getElementById("difficulty-label").textContent = DIFFICULTY_LABELS[p.difficulty] || p.difficulty;
+  document.getElementById("difficulty-label").textContent = `${p.clueCount} Hinweise`;
 
   const rowHints = document.getElementById("row-hints");
   rowHints.innerHTML = "";
@@ -988,7 +1010,9 @@ function hideSolution() {
   }
 }
 
-document.getElementById("generate-btn").addEventListener("click", generate);
+document.getElementById("generate-btn").addEventListener("click", newSearch);
+document.getElementById("accept-btn").addEventListener("click", acceptNow);
+document.getElementById("extend-btn").addEventListener("click", extendSearch);
 document.getElementById("reveal-btn").addEventListener("click", () => {
   const code = document.getElementById("code-input").value;
   const grid = decodeCode(code);

@@ -2,7 +2,7 @@
 
 Dieses Dokument beschreibt die interne Funktionsweise von `logicals.html`: wie
 die Gitter erzeugt werden, wie die Hinweise ausgewählt werden, wie der Solver
-arbeitet und wie sich die drei Schwierigkeitsstufen voneinander unterscheiden.
+arbeitet und wie das Zeit-Turnier die Hinweiszahl (= Schwierigkeit) minimiert.
 
 ## Spielregeln
 
@@ -31,8 +31,12 @@ Hinweistypen, die der Generator erzeugt:
 
 Die Erzeugung läuft in **Web Workers** (`workerCode()` im Quelltext, per
 `Blob` + `URL.createObjectURL` als Worker-Skript geladen). Bis zu 4 Worker
-arbeiten parallel — der erste, der ein gültiges Rätsel findet, gewinnt; die
-anderen werden terminiert.
+laufen parallel als **Zeit-Turnier**: jeder erzeugt und minimiert
+fortlaufend Rätsel und meldet immer dann eines, wenn es weniger Hinweise hat
+als sein bisher bestes. Der Hauptthread hält über alle Worker das globale
+Minimum, zeigt es live an und beendet die Worker nach Ablauf des Zeitbudgets
+(oder per „Übernehmen", oder bei Stagnation). Siehe „Suchstrategie &
+Schwierigkeit".
 
 Der Hauptthread kümmert sich um UI, Encoding/Decoding des Lösungscodes
 (Crockford-Base32, 31 Zeichen mit Prüfsumme) und die Worker-Verwaltung.
@@ -42,7 +46,8 @@ Der Hauptthread kümmert sich um UI, Encoding/Decoding des Lösungscodes
 Datei-Funktionen: `decideSequences`, `applySequencesToGrid`, `generateGrid`.
 
 1. **Sequenz-Vorabbelegung**: Pro Rätsel werden 1–3 Reihen oder Spalten
-   zufällig als Sequenz-Linien festgelegt (siehe Tabelle weiter unten). Jede
+   zufällig als Sequenz-Linien festgelegt (der Worker würfelt die Anzahl je
+   Versuch). Jede
    Sequenz erhält einen zufälligen Typ (directSequence / ascending /
    descending) und konkrete Werte:
    - `directSequence`: ein 6er-Block aus aufeinanderfolgenden Zahlen (1–6,
@@ -109,9 +114,11 @@ Pro Durchlauf werden angewandt:
 36 Zellen sind auf genau einen Wert bestimmt — Rätsel deduzierbar **und**
 eindeutig. Eine leergelaufene Domain (`bad`) heißt Widerspruch → `false`.
 
-## Hinweis-Auswahl (REDUCE + Rebalance)
+## Hinweis-Auswahl (`pickClues`)
 
-Funktion: `pickClues(grid, cfg)`.
+Funktion: `pickClues(grid, cfg)`. Die App ruft sie **immer mit
+`{ targetClues: 0 }`** auf — also volle Minimierung; die eigentliche
+Schwierigkeitssteuerung übernimmt das Zeit-Turnier (siehe unten).
 
 1. **Mit allen Kandidaten starten**: Für jede Reihe/Spalte werden alle
    anwendbaren Hinweise (1 duplicate bei Dopplung, alle pairSum, 1 totalSum,
@@ -122,20 +129,21 @@ Funktion: `pickClues(grid, cfg)`.
    Rätsel deduzierbar bleibt. Reihenfolge: vollste Linien zuerst (das ebnet
    die Verteilung ein), und je Linie totalSum vor pairSum (Sequenzen und
    Mandatory-Duplikate werden geschont). Ergebnis: ein nahezu minimales,
-   gleichmäßig verteiltes Hinweisset.
-3. **Phase 2 — für leichtere Stufen wieder auffüllen**: Solange weniger als
-   `cfg.targetClues` Hinweise vorhanden sind, werden entfernte Kandidaten auf
-   die **leersten** Linien zurückgelegt (balanciert das Layout). Zusätzliche
-   Hinweise können Deduzierbarkeit nie zerstören. Schwer nutzt `targetClues:
-   0` → bleibt minimal.
-4. **Σ-Cap**: Höchstens 5 totalSum-Hinweise; überschüssige werden entfernt,
-   solange Deduzierbarkeit erhalten bleibt, sonst Gitter verwerfen.
+   gleichmäßig verteiltes Hinweisset. **Weil totalSum zuerst weicht,
+   verschwinden totalSum-Hinweise bei voller Minimierung praktisch immer.**
+3. **Phase 2 — auf `cfg.targetClues` auffüllen** (nur falls > aktueller Zahl,
+   also bei der reinen Minimierung der App **inaktiv**): entfernte Kandidaten
+   werden auf die leersten Linien zurückgelegt. Legacy-Pfad für einen festen
+   Hinweis-Zielwert.
+4. **Σ-Cap**: Höchstens 5 totalSum-Hinweise (greift nur, wenn Phase 2 welche
+   zurückgelegt hätte).
 5. **Anzeige-Sortierung** pro Linie: duplicate, Sequenz, pairSums
    (positionsweise), totalSum.
 
-Da jede Entfernung über `logicalSolve` geprüft wird, ist das emittierte Rätsel
-garantiert ohne Raten lösbar. Konsequenz der nötigen Redundanz: Linien tragen
-typisch 3–4 Hinweise (selten 5) statt der früher angestrebten 2–3.
+Da jede Entfernung über `logicalSolve` geprüft wird, ist jedes Ergebnis ohne
+Raten lösbar. Ein einzelner Reduktionslauf landet in *einem* lokalen Minimum
+(~19 Hinweise im Schnitt, Streuung min ~11 … max ~26); das Turnier nutzt diese
+Streuung aus.
 
 ## Lösungscode
 
@@ -150,43 +158,43 @@ verpackt (Alphabet `0–9 A–Z` ohne `I L O U`):
 Beim Eingabefeld werden Kleinbuchstaben, Bindestriche und Leerzeichen
 toleriert. Ungültige Codes werden über die Prüfsumme erkannt.
 
-## Schwierigkeitsstufen
+## Suchstrategie & Schwierigkeit (Zeit-Turnier)
 
-Konfiguration im Worker (`DIFFICULTY_CONFIG`):
+Es gibt **keine festen Schwierigkeitsstufen** mehr. Stattdessen bestimmt die
+**Hinweiszahl** die Schwierigkeit (weniger Hinweise ⇒ schwerer), und die
+**Suchzeit** bestimmt, wie weit minimiert wird.
 
-| Parameter                              | Leicht | Mittel | Schwer |
-|----------------------------------------|:------:|:------:|:------:|
-| Garantierte Sequenzen (`numSequences`) |   3    |   2    |   1    |
-| Hinweis-Zielzahl (`targetClues`)       |   32   |   27   |   0    |
-| Sequenz-Hinweis behalten (`keepSequences`) | ja | ja    |  ja    |
-| Max. Σ-Hinweise gesamt                 |   5    |   5    |   5    |
-| Max. Dopplungs-Linien im Gitter        |   5    |   5    |   5    |
-| Typische Gesamthinweiszahl             | ~32    | ~27    | ~20    |
+Worker-Schleife (`self.onmessage`, läuft endlos bis `terminate()`):
 
-`targetClues` steuert, wie weit Phase 2 wieder auffüllt: eine höhere Zahl
-bedeutet **mehr** redundante Hinweise und damit ein **leichteres** Rätsel.
-`targetClues: 0` (Schwer) füllt nicht auf — es bleibt beim nahezu minimalen,
-deduzierbaren Set. (Die Reduktion geht nie unter das, was Deduzierbarkeit
-erfordert; die reale Zahl kann den Zielwert bei Schwer also übersteigen.)
+1. zufällig 1–3 Sequenzen wählen (Variety; jedes Rätsel hat ≥ 1 Sequenz),
+   Gitter erzeugen,
+2. `pickClues(grid, { targetClues: 0 })` → minimales deduzierbares Set,
+3. nur posten, wenn die Hinweiszahl unter dem bisher besten Wert liegt
+   (`threshold` erlaubt, bei „Weiter suchen" nur echte Verbesserungen zu
+   melden).
 
-**Warum Schwer schwerer ist**: nahezu minimales Hinweisset → lange
-Deduktionsketten, kaum Redundanz, nur 1 Sequenz und (durch das frühe
-Entfernen) faktisch keine totalSum-Hinweise.
+Hauptthread (`startSearch` / `searchTick` / `finishSearch`):
 
-**Warum Leicht leichter ist**: deutlich mehr (redundante) Hinweise auf
-gleichmäßig verteilten Linien und 3 Sequenzen, die ganze Linien auf einen
-Schlag stark determinieren.
+- Standard-Budget **~6 s** (`DEFAULT_BUDGET_MS`), „Weiter suchen" hängt
+  jeweils **+10 s** an (`EXTEND_MS`).
+- **Adaptiver Frühstopp**: keine Verbesserung seit `STALL_MS` (2,5 s) und
+  mindestens `MIN_MS` (3 s) gelaufen → Suche beenden.
+- **„Übernehmen"** beendet sofort und nimmt das aktuell beste Rätsel.
+- Fortschrittsbalken läuft über die Zeit; der Status zeigt live die kleinste
+  bisher gefundene Hinweiszahl und die Versuchszahl.
+
+Mehr Suchzeit ⇒ weniger Hinweise ⇒ schwerer. Die Hinweiszahl wird am Rätsel
+und im Druck angezeigt.
 
 ## Performance
 
 `logicalSolve` ist im hinweisarmen Regime schnell **und** zuverlässig
-(Polynomialzeit-Fixpunkt statt exponentieller Suche). Ein Worker-Versuch
-(Gitter erzeugen + reduzieren) liegt bei ~5–9 ms; bei Mittel/Schwer liefert
-praktisch jedes erzeugte Gitter ein Rätsel, bei Leicht ~83 % (die
-Sequenz-Vorabbelegung für 3 Sequenzen scheitert öfter). Der erste Treffer
-erscheint mit vier parallelen Workern quasi sofort.
+(Polynomialzeit-Fixpunkt statt exponentieller Suche). Ein Versuch (Gitter
+erzeugen + voll minimieren) liegt bei ~6 ms; ein Thread schafft also
+~150–170 Versuche/s, vier Worker entsprechend ~600/s.
 
-Falls der Generator nach 400 Versuchen pro Worker × 4 Worker = 1600
-Versuche keinen Treffer findet, wird eine Fehlermeldung gezeigt
-(„Kein eindeutiges Rätsel gefunden …"); ein erneutes Klicken startet die
-Suche neu.
+Typische Ergebnisse des Turniers (4 Worker): nach ~1–2 s ~13–14 Hinweise,
+nach ~6 s ~11–12 Hinweise. Danach stark abnehmender Grenznutzen — die letzten
+1–2 Hinweise kosten überproportional Zeit, weshalb „Weiter suchen" optional
+ist. Das erste gültige Rätsel erscheint binnen Millisekunden; der
+Frühstopp beendet die Suche meist deutlich vor Ablauf des Budgets.
