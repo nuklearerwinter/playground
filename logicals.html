@@ -6,7 +6,7 @@
 <title>Logicals Rätselgenerator</title>
 <style>
   :root { --accent: #1a8c8c; }
-  body { font-family: Georgia, "Times New Roman", serif; max-width: 820px; margin: 1em auto; padding: 0 1em; color: #222; }
+  body { font-family: Georgia, "Times New Roman", serif; max-width: 1100px; margin: 1em auto; padding: 0 0.7em; color: #222; }
   h1 { color: var(--accent); margin: 0 0 0.2em; }
   .intro { color: #555; font-size: 0.95em; margin: 0 0 1em; }
   .controls { background: #f4f4f4; padding: 1em 1.2em; border-radius: 8px; margin-bottom: 1.2em; }
@@ -19,7 +19,7 @@
   .settings-grid { display: grid; grid-template-columns: max-content max-content; gap: 0.4em 0.7em; align-items: center; margin: 0.6em 0 0; }
   .settings-grid select { font-family: inherit; font-size: 0.95em; padding: 0.15em 0.3em; border: 1px solid #bbb; border-radius: 4px; }
   .settings-note { color: #777; font-size: 0.82em; line-height: 1.35; margin: 0.6em 0 0; }
-  button { padding: 0.55em 1.1em; font-size: 1em; cursor: pointer; margin: 0.2em 0.2em; border-radius: 4px; border: 1.5px solid var(--accent); background: white; color: var(--accent); font-family: inherit; }
+  button { display: inline-flex; align-items: center; justify-content: center; gap: 0.3em; line-height: 1; padding: 0.55em 1.1em; font-size: 1em; cursor: pointer; margin: 0.2em 0.2em; border-radius: 4px; border: 1.5px solid var(--accent); background: white; color: var(--accent); font-family: inherit; box-sizing: border-box; }
   button:hover:not(:disabled) { background: var(--accent); color: white; }
   button:disabled { opacity: 0.5; cursor: progress; }
   #progress { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4em 0.7em; margin-top: 0.7em; color: #555; }
@@ -51,13 +51,78 @@
   /* Lösungsweg: Gitter + mitlaufende Schrittliste nebeneinander (auf Mobile untereinander). */
   .solve-area { display: flex; gap: 1.2em; align-items: flex-start; justify-content: center; flex-wrap: wrap; margin: 1.2em 0 1em; }
   .solve-area table#grid { margin: 0; }
-  #step-list { margin: 0; padding: 0; list-style: none; flex: 1 1 260px; min-width: 0; max-width: 360px; max-height: 420px; overflow-y: auto; font-size: 0.92em; border: 1px solid #ddd; border-radius: 6px; }
+  #step-list { margin: 0; padding: 0; list-style: none; flex: 1 1 auto; min-width: 0; max-height: 480px; overflow-y: auto; font-size: 0.92em; border: 1px solid #ddd; border-radius: 8px; background: #fff; }
   #step-list[hidden] { display: none; }
-  #step-list li { padding: 0.32em 0.6em; border-bottom: 1px solid #eee; cursor: pointer; line-height: 1.3; }
-  #step-list li:last-child { border-bottom: none; }
-  #step-list li:hover { background: #f4fafa; }
-  #step-list li.current { background: #e3f4f4; font-weight: 600; }
-  #step-list .stp-cell { font-weight: bold; color: var(--accent); }
+  #step-list li.step-card { padding: 0.55em 0.7em; border-bottom: 1px solid #eee; cursor: pointer; line-height: 1.35; }
+  #step-list li.step-card:last-child { border-bottom: none; }
+  #step-list li.step-card:hover { background: #f4fafa; }
+  #step-list li.step-card.current { background: #eef8f8; box-shadow: inset 4px 0 0 var(--accent); }
+  .step-head { display: flex; flex-wrap: wrap; gap: 0.35em; align-items: center; margin-bottom: 0.2em; }
+  .step-head .chip { display: inline-flex; align-items: center; gap: 0.25em; padding: 0.12em 0.55em; border-radius: 999px; font-size: 0.95em; background: #eaf3f3; color: #1a5e5e; font-family: Arial, Helvetica, sans-serif; }
+  .step-head .chip b { font-weight: 700; }
+  .step-head .chip.sum  { background: #e1ecf7; color: #154f8a; }
+  .step-head .chip.seq  { background: #f1e9fa; color: #5a2a8a; }
+  .step-head .chip.dist { background: #fbe6cf; color: #7a3c10; }
+  .step-head .chip.adj  { background: #f4dada; color: #7a1d1d; }
+  .step-head .chip.glob { background: #e3e3e3; color: #444; }
+  .step-head .chip.dup  { background: #fff1a8; color: #7a5d10; }
+  .step-head .chip-side { color: #888; font-size: 0.84em; }
+  .step-desc { color: #555; font-size: 0.93em; margin: 0.15em 0 0.3em; }
+  .step-rmv { list-style: none; padding: 0; margin: 0.15em 0 0; }
+  .step-rmv > li { display: flex; align-items: center; gap: 0.5em; padding: 0.12em 0; cursor: default; border: none; }
+  .step-rmv .cell-tag { font-weight: 700; color: var(--accent); min-width: 1.9em; font-family: Georgia, serif; }
+  .strikes { display: inline-flex; gap: 0.25em; align-items: center; flex-wrap: wrap; }
+  .strikes .d { display: inline-block; font-family: Arial, Helvetica, sans-serif; color: #c33; text-decoration: line-through; font-weight: 600; font-size: 0.95em; min-width: 0.95em; text-align: center; }
+  .step-combos { margin-top: 0.45em; padding-top: 0.35em; border-top: 1px dashed #ddd; color: #555; font-size: 0.88em; font-family: Arial, Helvetica, sans-serif; }
+  .step-combos .lbl { color: #888; }
+  /* pair-sum connector: short bar centered on the shared border. The pseudo is
+     attached to the inner .cands/.solved DIV (not the <td>) because absolute
+     positioning relative to a `display: table-cell` element with border-collapse
+     is unreliable across browsers — the marker would land at the wrong cell
+     edge. The inner div is a normal block, fills the cell, and is a stable
+     containing block. */
+  table#grid td .cands, table#grid td .solved { position: relative; }
+  table#grid.pencil td.pair-r > .cands::after,
+  table#grid.pencil td.pair-r > .solved::after,
+  table#grid.pencil td.pair-b > .cands::after,
+  table#grid.pencil td.pair-b > .solved::after {
+    content: ""; position: absolute; background: var(--accent); border-radius: 2px;
+    pointer-events: none; z-index: 2;
+  }
+  table#grid.pencil td.pair-r > .cands::after,
+  table#grid.pencil td.pair-r > .solved::after {
+    width: 0.9em; height: 3px; top: 0; bottom: 0; margin: auto 0;
+    right: -0.45em; /* half of width → straddles the right border */
+  }
+  table#grid.pencil td.pair-b > .cands::after,
+  table#grid.pencil td.pair-b > .solved::after {
+    width: 3px; height: 0.9em; left: 0; right: 0; margin: 0 auto;
+    bottom: -0.45em; /* half of height → straddles the bottom border */
+  }
+  /* Row/column-end badge cells (Σ / sequence arrows / duplicate icon) — only visible in step mode */
+  table#grid td.badge-cell, table#grid th.badge-cell, table#grid tr.col-end-row { display: none; }
+  table#grid.pencil td.badge-cell { display: table-cell; }
+  table#grid.pencil th.badge-cell { display: table-cell; }
+  table#grid.pencil tr.col-end-row { display: table-row; }
+  table#grid td.badge-cell, table#grid tr.col-end-row th { border: none !important; background: transparent !important; width: auto; height: auto; padding: 0.1em 0.3em; vertical-align: middle; font-size: 0.88em; }
+  table#grid tr.col-end-row td.badge-cell { vertical-align: top; padding-top: 0.25em; }
+  .rb-stack { display: flex; flex-direction: column; gap: 0.18em; align-items: flex-start; }
+  table#grid tr.col-end-row .rb-stack { align-items: center; }
+  .rb { display: inline-flex; align-items: center; gap: 0.15em; padding: 0.05em 0.4em; border-radius: 999px; font-size: 0.95em; font-family: Arial, Helvetica, sans-serif; line-height: 1.2; white-space: nowrap; }
+  .rb.sum { background: #e1ecf7; color: #154f8a; font-weight: 700; }
+  .rb.seq { background: #f1e9fa; color: #5a2a8a; font-weight: 700; padding: 0.05em 0.35em; }
+  .rb.dup { background: #fff1a8; color: #7a5d10; font-weight: 700; }
+  .rb sup { font-size: 0.7em; }
+  .rb-arr { height: 0.85em; width: auto; vertical-align: middle; display: inline-block; }
+  .rb-arr.v { height: 1.15em; }
+  .steps-toggle { margin: 0.4em 0; text-align: center; }
+  /* Side-by-side step panel beside the grid (controls above the scrollable list). */
+  .step-panel { flex: 1 1 320px; min-width: 0; max-width: 520px; display: flex; flex-direction: column; gap: 0.4em; }
+  .step-panel[hidden] { display: none; }
+  .step-controls { display: flex; flex-wrap: wrap; gap: 0.3em; align-items: center; padding: 0.2em 0.1em; border-bottom: 1px solid #eee; }
+  .step-controls[hidden] { display: none; }
+  .step-controls button { padding: 0.4em 0.75em; font-size: 0.92em; min-height: 2.15em; margin: 0; }
+  .step-controls #step-counter { margin-left: auto; color: #555; font-size: 0.88em; padding: 0 0.3em; }
   .step-controls { display: flex; flex-wrap: wrap; gap: 0.4em; align-items: center; margin: 0.2em 0 0.6em; }
   .step-controls[hidden] { display: none; }
   .step-controls #step-counter { color: #555; font-size: 0.9em; margin-left: 0.3em; }
@@ -96,6 +161,9 @@
     table#grid { margin: 0.6cm auto; }
     table#grid th { width: 1.7cm; height: 1.7cm; font-size: 16pt; }
     table#grid td { width: 1.7cm; height: 1.7cm; font-size: 14pt; }
+    table#grid td.badge-cell { width: auto; height: auto; padding: 0.1cm 0.2cm; font-size: 9pt; border: none !important; background: transparent !important; }
+    table#grid tr.col-end-row td.badge-cell { vertical-align: top; }
+    table#grid tr.col-end-row th { width: auto; height: auto; }
     .difficulty-display { font-size: 10pt; margin: 0.1cm 0; }
     .hints h3 { font-size: 11pt; margin: 0.15cm 0; }
     .hints li { margin: 0.04cm 0; line-height: 1.25; }
@@ -121,7 +189,6 @@
     <button id="generate-btn">Neues Rätsel</button>
     <button id="accept-btn" hidden>Übernehmen</button>
     <button id="extend-btn" hidden>Weiter suchen</button>
-    <button id="steps-btn" disabled>Lösungsweg</button>
     <button id="print-btn" disabled>Drucken</button>
     <p class="controls-hint">Es wird einige Sekunden lang nach einem möglichst hinweisarmen,
       eindeutig per Logik lösbaren Rätsel gesucht — je weniger Hinweise, desto schwerer.
@@ -173,15 +240,18 @@
     </div>
     <div class="solve-area">
       <table id="grid"></table>
-      <ol id="step-list" hidden></ol>
+      <div class="step-panel" id="step-panel" hidden>
+        <div class="step-controls" id="step-controls">
+          <button id="step-prev">‹ Zurück</button>
+          <button id="step-play">▶ Abspielen</button>
+          <button id="step-next">Weiter ›</button>
+          <button id="step-reset">↺ Zurücksetzen</button>
+          <span id="step-counter"></span>
+        </div>
+        <ol id="step-list"></ol>
+      </div>
     </div>
-    <div class="step-controls" id="step-controls" hidden>
-      <button id="step-prev">‹ Zurück</button>
-      <button id="step-play">▶ Abspielen</button>
-      <button id="step-next">Weiter ›</button>
-      <button id="step-reset">↺ Zurücksetzen</button>
-      <span id="step-counter"></span>
-    </div>
+    <div class="steps-toggle"><button id="steps-btn" disabled>Lösungsweg</button></div>
     <div class="solution-code" id="code-block" hidden>
       <div class="code-text">
         <strong>Lösungscode:</strong> <span id="code" class="code-value">—</span>
@@ -1058,6 +1128,8 @@ function buildGridTable() {
     th.textContent = COL_LABELS[c];
     header.appendChild(th);
   }
+  const corner = document.createElement("th"); corner.className = "badge-cell";
+  header.appendChild(corner); // top-right corner above row-end column (hidden outside step mode)
   tbl.appendChild(header);
   for (let r = 0; r < N; r++) {
     const tr = document.createElement("tr");
@@ -1070,8 +1142,26 @@ function buildGridTable() {
       td.dataset.c = c;
       tr.appendChild(td);
     }
+    const endTd = document.createElement("td");
+    endTd.className = "badge-cell row-end";
+    endTd.dataset.rowEnd = r;
+    tr.appendChild(endTd);
     tbl.appendChild(tr);
   }
+  // Bottom row carries column-end badges (Σ / sequence / duplicate icons).
+  const bot = document.createElement("tr");
+  bot.className = "col-end-row";
+  const lhs = document.createElement("th"); lhs.className = "badge-cell";
+  bot.appendChild(lhs);
+  for (let c = 0; c < N; c++) {
+    const td = document.createElement("td");
+    td.className = "badge-cell col-end";
+    td.dataset.colEnd = c;
+    bot.appendChild(td);
+  }
+  const rhs = document.createElement("th"); rhs.className = "badge-cell";
+  bot.appendChild(rhs);
+  tbl.appendChild(bot);
 }
 
 function ensureGridTable() {
@@ -1104,6 +1194,7 @@ function renderPuzzle(p) {
   }
 
   buildGridTable();
+  decorateGrid(p);
   document.getElementById("code").textContent = p.code;
   document.getElementById("code-input").value = p.code;
   document.getElementById("qr-wrap").innerHTML = makeQrSvg(shareUrl(p.code));
@@ -1120,12 +1211,76 @@ function showSolution(grid) {
   document.getElementById("difficulty-display").hidden = !currentPuzzle;
   const cells = document.getElementById("grid").querySelectorAll("td");
   for (const td of cells) {
+    if (td.dataset.r === undefined) continue; // skip badge cells
     td.textContent = grid[+td.dataset.r][+td.dataset.c];
   }
 }
 function clearGridCells() {
   const cells = document.getElementById("grid").querySelectorAll("td");
-  for (const td of cells) td.textContent = "";
+  for (const td of cells) {
+    if (td.dataset.r === undefined) continue; // leave badge cells intact
+    td.textContent = "";
+  }
+}
+
+// Pair-connector dots between adjacent linked cells, and Σ / sequence / duplicate
+// chips in the right-/below-grid badge cells. Called from renderPuzzle.
+function decorateGrid(p) {
+  const grid = document.getElementById("grid");
+  grid.querySelectorAll("td").forEach(td => td.classList.remove("pair-r", "pair-b"));
+  for (const list of p.clues.rowClues.concat(p.clues.colClues)) for (const cl of list) {
+    if (cl.type !== "pairSum") continue;
+    const [[r1, c1], [r2, c2]] = cl.cells;
+    if (r1 === r2 && Math.abs(c1 - c2) === 1) {
+      const cc = Math.min(c1, c2);
+      const td = grid.querySelector(`td[data-r="${r1}"][data-c="${cc}"]`);
+      if (td) td.classList.add("pair-r");
+    } else if (c1 === c2 && Math.abs(r1 - r2) === 1) {
+      const rr = Math.min(r1, r2);
+      const td = grid.querySelector(`td[data-r="${rr}"][data-c="${c1}"]`);
+      if (td) td.classList.add("pair-b");
+    }
+  }
+  // Two pairs of arrow icons. The line in front of the arrowhead conveys the
+  // semantics on its own (no extra label needed):
+  //   - solid bar  ──► : continuous = "direct" (consecutive integers, no gaps)
+  //   - dotted    ⋯⋯► : interrupted = "with gaps" (ascending / descending)
+  // Direction = direction of increasing values (so ascending col = ↓, descending col = ↑).
+  const ICON = {
+    solidR: '<svg class="rb-arr h" viewBox="0 0 22 10" aria-hidden="true"><rect x="1" y="3.5" width="11" height="3" fill="currentColor"/><path fill="currentColor" d="M10 0 l11 5 -11 5 z"/></svg>',
+    solidL: '<svg class="rb-arr h" viewBox="0 0 22 10" aria-hidden="true"><rect x="10" y="3.5" width="11" height="3" fill="currentColor"/><path fill="currentColor" d="M12 0 l-11 5 11 5 z"/></svg>',
+    solidD: '<svg class="rb-arr v" viewBox="0 0 10 22" aria-hidden="true"><rect x="3.5" y="1" width="3" height="11" fill="currentColor"/><path fill="currentColor" d="M0 10 l5 11 5 -11 z"/></svg>',
+    solidU: '<svg class="rb-arr v" viewBox="0 0 10 22" aria-hidden="true"><rect x="3.5" y="10" width="3" height="11" fill="currentColor"/><path fill="currentColor" d="M0 12 l5 -11 5 11 z"/></svg>',
+    dotR:   '<svg class="rb-arr h" viewBox="0 0 22 10" aria-hidden="true"><circle cx="2.5" cy="5" r="1.5" fill="currentColor"/><circle cx="7" cy="5" r="1.5" fill="currentColor"/><circle cx="11.5" cy="5" r="1.5" fill="currentColor"/><path fill="currentColor" d="M10 0 l11 5 -11 5 z"/></svg>',
+    dotL:   '<svg class="rb-arr h" viewBox="0 0 22 10" aria-hidden="true"><circle cx="19.5" cy="5" r="1.5" fill="currentColor"/><circle cx="15" cy="5" r="1.5" fill="currentColor"/><circle cx="10.5" cy="5" r="1.5" fill="currentColor"/><path fill="currentColor" d="M12 0 l-11 5 11 5 z"/></svg>',
+    dotD:   '<svg class="rb-arr v" viewBox="0 0 10 22" aria-hidden="true"><circle cx="5" cy="2.5" r="1.5" fill="currentColor"/><circle cx="5" cy="7" r="1.5" fill="currentColor"/><circle cx="5" cy="11.5" r="1.5" fill="currentColor"/><path fill="currentColor" d="M0 10 l5 11 5 -11 z"/></svg>',
+    dotU:   '<svg class="rb-arr v" viewBox="0 0 10 22" aria-hidden="true"><circle cx="5" cy="19.5" r="1.5" fill="currentColor"/><circle cx="5" cy="15" r="1.5" fill="currentColor"/><circle cx="5" cy="10.5" r="1.5" fill="currentColor"/><path fill="currentColor" d="M0 12 l5 -11 5 11 z"/></svg>',
+  };
+  function chipHtml(cl) {
+    switch (cl.type) {
+      case "totalSum":   return `<span class="rb sum" title="Summe aller sechs Zahlen"><b>Σ</b>${cl.value}</span>`;
+      case "directSequence":
+        return `<span class="rb seq" title="direkt aufeinanderfolgend (lückenlos)">${cl.scope === "row" ? ICON.solidR : ICON.solidD}</span>`;
+      case "ascending":
+        return `<span class="rb seq" title="aufsteigend (mit Lücken erlaubt)">${cl.scope === "row" ? ICON.dotR : ICON.dotD}</span>`;
+      case "descending":
+        return `<span class="rb seq" title="absteigend (mit Lücken erlaubt)">${cl.scope === "row" ? ICON.dotL : ICON.dotU}</span>`;
+      case "duplicate":  return `<span class="rb dup" title="Zahl kommt doppelt vor"><b>${cl.value}</b><sup>×2</sup></span>`;
+      default: return "";
+    }
+  }
+  function chipsFor(list) {
+    const order = { duplicate: 0, totalSum: 1, directSequence: 2, ascending: 2, descending: 2 };
+    return list.filter(cl => cl.type in order).slice().sort((a, b) => order[a.type] - order[b.type]).map(chipHtml).join("");
+  }
+  for (let r = 0; r < N; r++) {
+    const endTd = grid.querySelector(`td[data-row-end="${r}"]`);
+    if (endTd) endTd.innerHTML = '<div class="rb-stack">' + chipsFor(p.clues.rowClues[r]) + '</div>';
+  }
+  for (let c = 0; c < N; c++) {
+    const endTd = grid.querySelector(`td[data-col-end="${c}"]`);
+    if (endTd) endTd.innerHTML = '<div class="rb-stack">' + chipsFor(p.clues.colClues[c]) + '</div>';
+  }
 }
 function hideSolution() {
   exitStepMode();
@@ -1184,7 +1339,7 @@ function solveWithTrace(clues) {
     if (removed) { domains[idx] &= mask; cur.set(idx, (cur.get(idx) || 0) | removed); if (domains[idx] === 0) bad = true; }
   }
   function begin() { cur = new Map(); }
-  function commit(reason) {
+  function commit(reason, ruleType, clueInfo) {
     if (cur && cur.size) {
       const removals = [], solved = [];
       for (const [idx, mask] of cur) {
@@ -1192,11 +1347,13 @@ function solveWithTrace(clues) {
         removals.push({ idx, vals });
         if (isSingle(idx)) solved.push(idx);
       }
-      steps.push({ reason, removals, solved });
+      steps.push({ reason, ruleType, clue: clueInfo || null, removals, solved });
     }
     cur = null;
   }
-  function unit(getIdx, dupMask, label) {
+  function unit(getIdx, dupMask, label, scope) {
+    const rt = scope === "row" ? "distinct-row" : "distinct-col";
+    const rtDup = scope === "row" ? "dup-hidden-row" : "dup-hidden-col";
     for (let v = 1; v <= 9 && !bad; v++) {
       const b = bit(v), isDup = (dupMask & b) !== 0, maxC = isDup ? 2 : 1;
       let single = 0; const open = [], fixedAt = [];
@@ -1204,12 +1361,14 @@ function solveWithTrace(clues) {
       if (single > maxC) { bad = true; return; }
       if (single >= maxC && open.length) {
         begin(); for (const idx of open) rmBit(idx, v);
-        commit("Die " + v + " steht in " + fixedAt.map(cl2).join(" und ") + " ⇒ keine weitere " + v + " in " + label);
+        commit("Jede Zahl höchstens einmal pro " + (scope === "row" ? "Reihe" : "Spalte") + ".", rt,
+          { value: v, fixedAt: fixedAt.slice(), label, scope });
       } else if (isDup && single < maxC) {
         if (single + open.length < maxC) { bad = true; return; }
         if (open.length === maxC - single) {
           begin(); for (const idx of open) keep(idx, b);
-          commit("Die doppelte " + v + " passt in " + label + " nur noch in " + open.map(cl2).join(", "));
+          commit("Die " + v + " muss zweimal in " + label + " stehen — nur diese Plätze bleiben übrig.", rtDup,
+            { value: v, cells: open.slice(), label, scope });
         }
       }
     }
@@ -1228,20 +1387,20 @@ function solveWithTrace(clues) {
       if (r < N - 1) rmBit((r + 1) * N + c, v);
       if (c > 0) rmBit(r * N + c - 1, v);
       if (c < N - 1) rmBit(r * N + c + 1, v);
-      commit(cl2(idx) + " = " + v + ": gleiche Zahlen nie direkt benachbart ⇒ " + v + " raus aus den Nachbarn");
+      commit("Gleiche Zahlen dürfen nicht direkt nebeneinander stehen.", "adjacency", { srcIdx: idx, value: v });
     }
     if (bad) break;
     // 2. Distinktheit / Dup-Hidden je Reihe, dann Spalte
-    for (let r = 0; r < N && !bad; r++) unit(k => r * N + k, rowDup[r], rowLabel(r));
+    for (let r = 0; r < N && !bad; r++) unit(k => r * N + k, rowDup[r], rowLabel(r), "row");
     if (bad) break;
-    for (let c = 0; c < N && !bad; c++) unit(k => k * N + c, colDup[c], colLabel(c));
+    for (let c = 0; c < N && !bad; c++) unit(k => k * N + c, colDup[c], colLabel(c), "col");
     if (bad) break;
     // 3. Globale Zählung: jede Zahl genau 4×
     for (let v = 1; v <= 9 && !bad; v++) {
       const b = bit(v); let single = 0; const open = [];
       for (let i = 0; i < N * N; i++) if (domains[i] & b) { if (isSingle(i)) single++; else open.push(i); }
       if (single > 4 || single + open.length < 4) { bad = true; break; }
-      if (single >= 4 && open.length) { begin(); for (const idx of open) rmBit(idx, v); commit("Die " + v + " kommt bereits 4× vor ⇒ überall sonst raus"); }
+      if (single >= 4 && open.length) { begin(); for (const idx of open) rmBit(idx, v); commit("Die " + v + " ist bereits viermal platziert — überall sonst entfernen.", "global", { value: v }); }
     }
     if (bad) break;
     // 4. pairSum: A + B = S
@@ -1249,7 +1408,7 @@ function solveWithTrace(clues) {
       const da = domains[p.a], db = domains[p.b]; let mA = 0, mB = 0;
       for (let v = 1; v <= 9; v++) { const w = p.value - v; if (w < 1 || w > 9) continue; if ((da & bit(v)) && (db & bit(w))) { mA |= bit(v); mB |= bit(w); } }
       begin(); keep(p.a, mA); keep(p.b, mB);
-      commit(cl2(p.a) + " + " + cl2(p.b) + " = " + p.value + ": nur Werte mit passendem Partner bleiben");
+      commit("Diese Werte haben keinen passenden Partner mehr.", "pairSum", { a: p.a, b: p.b, value: p.value });
       if (bad) break;
     }
     if (bad) break;
@@ -1263,7 +1422,8 @@ function solveWithTrace(clues) {
         let mask = 0; for (let v = Math.max(1, lo); v <= Math.min(9, hi); v++) mask |= bit(v);
         keep(cells[k], mask);
       }
-      commit("Summe von " + (t.scope === "row" ? rowLabel(t.index) : colLabel(t.index)) + " = " + t.value + " ⇒ Wertebereiche eingegrenzt");
+      commit("Mit diesen Werten ließe sich die geforderte Summe nicht mehr erreichen.", "totalSum",
+        { cells: t.cells.slice(), value: t.value, scope: t.scope, index: t.index });
       if (bad) break;
     }
     if (bad) break;
@@ -1279,7 +1439,8 @@ function solveWithTrace(clues) {
       } else {
         for (let k = 0; k < cells.length - 1; k++) { const mx = maxV(domains[cells[k]]); let m1 = 0; for (let v = 1; v <= mx - 1; v++) m1 |= bit(v); keep(cells[k + 1], m1); const mn = minV(domains[cells[k + 1]]); let m2 = 0; for (let v = mn + 1; v <= 9; v++) m2 |= bit(v); keep(cells[k], m2); }
       }
-      commit((s.scope === "row" ? rowLabel(s.index) : colLabel(s.index)) + ": Zahlen " + word + " ⇒ Werte eingegrenzt");
+      commit("Diese Werte passen nicht mehr in die geforderte Reihenfolge.", "sequence",
+        { cells: s.cells.slice(), kind: s.type, scope: s.scope, index: s.index });
       if (bad) break;
     }
     if (bad) break;
@@ -1311,8 +1472,7 @@ function enterStepMode() {
   }
   stepTrace = tr; stepMode = true; stepIndex = 0;
   document.getElementById("puzzle").hidden = false;
-  el("step-list").hidden = false;
-  el("step-controls").hidden = false;
+  el("step-panel").hidden = false;
   el("steps-btn").textContent = "Lösungsweg ausblenden";
   renderStep();
 }
@@ -1324,6 +1484,107 @@ function stepCandidates(upto) {
     dom[rm.idx] &= ~mask;
   }
   return dom;
+}
+// Header chip for a step (clue type as title; styling by ruleType).
+function clueHeadHtml(step) {
+  const cl = step.clue;
+  const lab = idx => cellLabel((idx / N) | 0, idx % N);
+  const scopeLabel = c => c.scope === "row" ? "Reihe " + ROW_LABELS[c.index] : "Spalte " + COL_LABELS[c.index];
+  switch (step.ruleType) {
+    case "adjacency":
+      return `<span class="chip adj"><b>${lab(cl.srcIdx)} = ${cl.value}</b> · keine ${cl.value} nebenan</span>`;
+    case "distinct-row":
+    case "distinct-col":
+      return `<span class="chip dist"><b>${cl.value}</b> fest in ${cl.fixedAt.map(lab).join(", ")} · ${cl.label}</span>`;
+    case "global":
+      return `<span class="chip glob"><b>${cl.value}</b> ist 4× voll</span>`;
+    case "pairSum":
+      return `<span class="chip sum"><b>${lab(cl.a)} + ${lab(cl.b)} = ${cl.value}</b></span>`;
+    case "totalSum":
+      return `<span class="chip sum"><b>Σ ${scopeLabel(cl)} = ${cl.value}</b></span>`;
+    case "sequence": {
+      const arrow = cl.kind === "directSequence" ? "→" : (cl.kind === "ascending" ? "↑" : "↓");
+      const word = cl.kind === "directSequence" ? "direkt aufeinanderfolgend" : (cl.kind === "ascending" ? "aufsteigend" : "absteigend");
+      return `<span class="chip seq">${arrow} <b>${scopeLabel(cl)}</b> · ${word}</span>`;
+    }
+    case "dup-hidden-row":
+    case "dup-hidden-col":
+      return `<span class="chip dup">doppelte <b>${cl.value}</b> in ${cl.label}</span>`;
+    default: return `<span class="chip">${step.ruleType || ""}</span>`;
+  }
+}
+function strikeStripHtml(vals) {
+  let h = '<span class="strikes">';
+  for (const v of vals) h += '<span class="d">' + v + '</span>';
+  return h + '</span>';
+}
+// Enumerate valid combinations remaining for the clue of `step`, given the
+// candidate state `dom` AFTER this step's removals. Lets the user see why this
+// step is justified — e.g. for "A5+B5=14 → A5=9", the partner B5's still-valid
+// candidates explain it. Capped to keep enumeration fast.
+function combosHtmlForStep(step, dom) {
+  const cl = step.clue; if (!cl) return null;
+  const popc = m => { let n=0,t=m; while(t){n++;t&=t-1;} return n; };
+  const minV = m => { for (let v=1;v<=9;v++) if (m&(1<<(v-1))) return v; return 0; };
+  const maxV = m => { for (let v=9;v>=1;v--) if (m&(1<<(v-1))) return v; return 0; };
+  function fmtTuple(t, sep) { return t.join(sep || "–"); }
+  function listOrCount(items, fmt, kind) {
+    if (!items.length) return `<span class="lbl">Keine ${kind} mehr möglich.</span>`;
+    if (items.length <= 4) return `<span class="lbl">Noch möglich:</span> ${items.map(fmt).join(", ")}`;
+    return `<span class="lbl">Noch ${items.length} ${kind} möglich.</span>`;
+  }
+  if (step.ruleType === "pairSum") {
+    const da = dom[cl.a], db = dom[cl.b]; const combos = [];
+    for (let v=1;v<=9;v++) { const w = cl.value-v; if (w<1||w>9) continue; if ((da&(1<<(v-1)))&&(db&(1<<(w-1)))) combos.push([v,w]); }
+    return listOrCount(combos, c => `<b>${c[0]}+${c[1]}</b>`, "Kombinationen");
+  }
+  if (step.ruleType === "totalSum") {
+    const doms = cl.cells.map(idx => dom[idx]);
+    const minsL = new Array(7).fill(0), maxsL = new Array(7).fill(0);
+    for (let i=5;i>=0;i--){ minsL[i]=minsL[i+1]+minV(doms[i]); maxsL[i]=maxsL[i+1]+maxV(doms[i]); }
+    const cap = 30, out = [];
+    function rec(k, sum, t) {
+      if (out.length >= cap) return;
+      if (k === 6) { if (sum === cl.value) out.push(t.slice()); return; }
+      const lo = cl.value - sum - maxsL[k+1], hi = cl.value - sum - minsL[k+1];
+      for (let v = Math.max(1, lo); v <= Math.min(9, hi); v++) {
+        if (doms[k] & (1<<(v-1))) { t.push(v); rec(k+1, sum+v, t); t.pop(); if (out.length >= cap) return; }
+      }
+    }
+    rec(0, 0, []);
+    if (out.length >= cap) return `<span class="lbl">Noch viele Kombinationen möglich (≥ ${cap}).</span>`;
+    return listOrCount(out, t => `<b>${fmtTuple(t, "+")}</b>`, "Summenkombinationen");
+  }
+  if (step.ruleType === "sequence") {
+    const doms = cl.cells.map(idx => dom[idx]);
+    const cap = 30, out = [];
+    if (cl.kind === "directSequence") {
+      for (let s=1; s<=4; s++) {
+        let ok = true;
+        for (let k=0; k<6; k++) if (!(doms[k] & (1<<(s+k-1)))) { ok=false; break; }
+        if (ok) out.push([s, s+5]);
+      }
+      return listOrCount(out, c => `<b>${c[0]}–${c[1]}</b>`, "Sequenzen");
+    }
+    if (cl.kind === "ascending") {
+      function rec(k, prev, t) {
+        if (out.length >= cap) return;
+        if (k === 6) { out.push(t.slice()); return; }
+        for (let v=prev+1; v<=9; v++) if (doms[k] & (1<<(v-1))) { t.push(v); rec(k+1, v, t); t.pop(); if (out.length >= cap) return; }
+      }
+      rec(0, 0, []);
+    } else { // descending
+      function rec(k, prev, t) {
+        if (out.length >= cap) return;
+        if (k === 6) { out.push(t.slice()); return; }
+        for (let v=prev-1; v>=1; v--) if (doms[k] & (1<<(v-1))) { t.push(v); rec(k+1, v, t); t.pop(); if (out.length >= cap) return; }
+      }
+      rec(0, 10, []);
+    }
+    if (out.length >= cap) return `<span class="lbl">Noch viele Anordnungen möglich (≥ ${cap}).</span>`;
+    return listOrCount(out, t => `<b>${fmtTuple(t, "‧")}</b>`, "Anordnungen");
+  }
+  return null;
 }
 function renderStep() {
   ensureGridTable();
@@ -1338,6 +1599,7 @@ function renderStep() {
     for (const idx of step.solved) solvedThis.add(idx);
   }
   grid.querySelectorAll("td").forEach(td => {
+    if (td.dataset.r === undefined) return; // skip badge cells
     const idx = (+td.dataset.r) * N + (+td.dataset.c);
     td.classList.remove("changed", "solved-now");
     const d = dom[idx];
@@ -1359,17 +1621,29 @@ function renderStep() {
   });
   const list = el("step-list");
   list.innerHTML = "";
-  for (let i = 0; i < stepIndex; i++) {
+  // Latest step on TOP so the buttons + most-recent reasoning stay in view.
+  for (let i = stepIndex - 1; i >= 0; i--) {
     const s = stepTrace.steps[i];
-    const detail = s.removals.map(rm => lab(rm.idx) + ": −" + rm.vals.join("")).join(", ");
     const li = document.createElement("li");
     li.dataset.step = i + 1;
-    li.innerHTML = `<b>${s.reason}</b><br><span class="stp-detail">${detail}</span>`;
-    if (i === stepIndex - 1) li.classList.add("current");
+    li.className = "step-card" + (i === stepIndex - 1 ? " current" : "");
+    let html = '<header class="step-head">' + clueHeadHtml(s) + '</header>';
+    if (s.reason) html += '<div class="step-desc">' + s.reason + '</div>';
+    if (s.removals && s.removals.length) {
+      html += '<ul class="step-rmv">';
+      for (const rm of s.removals) {
+        html += '<li><span class="cell-tag">' + lab(rm.idx) + '</span>' + strikeStripHtml(rm.vals) + '</li>';
+      }
+      html += '</ul>';
+    }
+    if (i === stepIndex - 1) {
+      const combos = combosHtmlForStep(s, dom);
+      if (combos) html += '<div class="step-combos">' + combos + '</div>';
+    }
+    li.innerHTML = html;
     list.appendChild(li);
   }
-  const cur = list.querySelector("li.current");
-  if (cur) cur.scrollIntoView({ block: "nearest" });
+  list.scrollTop = 0;
   el("step-counter").textContent = `Schritt ${stepIndex} / ${stepTrace.steps.length}`;
   el("step-prev").disabled = stepIndex <= 0;
   el("step-next").disabled = stepIndex >= stepTrace.steps.length;
@@ -1394,8 +1668,7 @@ function togglePlay() { if (stepTimer) stopPlay(); else startPlay(); }
 function exitStepMode() {
   stopPlay();
   stepMode = false; stepTrace = null; stepIndex = 0;
-  const list = document.getElementById("step-list"); if (list) list.hidden = true;
-  const ctrl = document.getElementById("step-controls"); if (ctrl) ctrl.hidden = true;
+  const panel = document.getElementById("step-panel"); if (panel) panel.hidden = true;
   const stepsBtn = document.getElementById("steps-btn"); if (stepsBtn) stepsBtn.textContent = "Lösungsweg";
   const grid = document.getElementById("grid");
   if (grid) {
