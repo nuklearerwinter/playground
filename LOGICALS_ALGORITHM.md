@@ -38,8 +38,9 @@ Minimum, zeigt es live an und beendet die Worker nach Ablauf des Zeitbudgets
 (oder per „Übernehmen", oder bei Stagnation). Siehe „Suchstrategie &
 Schwierigkeit".
 
-Der Hauptthread kümmert sich um UI, Encoding/Decoding des Lösungscodes
-(Crockford-Base32, 31 Zeichen mit Prüfsumme) und die Worker-Verwaltung.
+Der Hauptthread kümmert sich um UI, Encoding/Decoding des **Rätselcodes**
+(Crockford-Base32, 31–42 Zeichen mit Prüfsumme — enthält die Hinweise, nicht
+die Lösung) und die Worker-Verwaltung.
 
 ## Gitter-Generierung
 
@@ -145,18 +146,30 @@ Raten lösbar. Ein einzelner Reduktionslauf landet in *einem* lokalen Minimum
 (~19 Hinweise im Schnitt, Streuung min ~11 … max ~26); das Turnier nutzt diese
 Streuung aus.
 
-## Lösungscode
+## Rätselcode
 
-Die fertige Matrix wird in einem **31-Zeichen-Crockford-Base32-Code**
-verpackt (Alphabet `0–9 A–Z` ohne `I L O U`):
+Das Rätsel — **nicht** die Lösung — wird in einem Crockford-Base32-Code
+verpackt (Alphabet `0–9 A–Z` ohne `I L O U`, Bindestriche in 4er-Blöcken).
+Der Empfänger rekonstruiert die Lösung lokal aus den Clues per
+`solveWithTrace` (der Generator garantiert Lösbarkeit per reiner Deduktion).
 
-- 36 Zellen × 4 Bit = 144 Bit
-- + 8 Bit Prüfsumme = 152 Bit
-- gepadded auf 155 Bit = 31 Base32-Zeichen
-- mit Bindestrichen in 4er-Blöcken dargestellt
+Bit-Layout (`encodePuzzle` / `decodePuzzle`):
 
-Beim Eingabefeld werden Kleinbuchstaben, Bindestriche und Leerzeichen
-toleriert. Ungültige Codes werden über die Prüfsumme erkannt.
+- 4 Bit Version (0)
+- **pairSum**: 60-Bit-Bitmap (Indizes 0..29 = horizontale Paare zeilenmajor,
+  30..59 = vertikale Paare spaltenmajor) + 4 Bit pro gesetztem Bit für den
+  Summenwert (3..17 → 0..14)
+- **totalSum**: 12-Bit-Bitmap (0..5 = Reihen, 6..11 = Spalten) + 6 Bit pro
+  gesetztem Bit (6..54 → 0..48)
+- **duplicate**: 12-Bit-Bitmap + 4 Bit pro gesetztem Bit (1..9 → 0..8)
+- **sequence**: 12-Bit-Bitmap + 2 Bit pro gesetztem Bit
+  (0=directSequence, 1=ascending, 2=descending)
+- 8 Bit Prüfsumme (Summe aller vorigen Daten-Bytes mod 256)
+
+Gesamtlänge 152–200 Bit ≙ **31–42 Base32-Zeichen** je nach Hinweisdichte
+(Median ~37 bei Default-Einstellungen). Beim Eingabefeld werden
+Kleinbuchstaben, Bindestriche und Leerzeichen toleriert. Ungültige Codes
+werden über die Prüfsumme erkannt.
 
 ## Lösungsweg (Schritt für Schritt, Kandidaten-Darstellung)
 

@@ -155,7 +155,7 @@
     #step-list, .step-controls, #steps-btn { display: none !important; }
     .solve-area { display: block; }
     .solve-area table#grid { margin: 0.6cm auto; }
-    header { padding-right: 2.6cm; }
+    header { padding-right: 3.8cm; }
     h1 { font-size: 14pt; margin: 0 0 0.2cm; }
     .intro { font-size: 9.5pt; margin: 0 0 0.3cm; color: #333; line-height: 1.3; }
     table#grid { margin: 0.6cm auto; }
@@ -167,11 +167,29 @@
     .difficulty-display { font-size: 10pt; margin: 0.1cm 0; }
     .hints h3 { font-size: 11pt; margin: 0.15cm 0; }
     .hints li { margin: 0.04cm 0; line-height: 1.25; }
-    .solution-code { background: none; padding: 0; font-size: 9pt; word-break: break-all; display: block; }
-    .solution-code .code-text { text-align: left; }
-    .solution-code small { display: none; }
-    .solution-code .qr-wrap { position: absolute; top: 0; right: 0; }
+    /* Print layout: QR top-right with the puzzle code stacked below it,
+       blocks wrap only at the dashes (each dash carries a <wbr>), and never
+       inside a 4-char block. */
+    .solution-code {
+      background: none; padding: 0; margin: 0;
+      position: absolute; top: 0; right: 0;
+      width: 3.6cm;
+      display: flex; flex-direction: column; align-items: center; gap: 0.15cm;
+    }
+    .solution-code .qr-wrap { order: 1; flex: 0 0 auto; }
     .solution-code .qr-wrap svg { width: 2.4cm; height: 2.4cm; padding: 0; background: white; }
+    .solution-code .code-text {
+      order: 2; flex: 0 0 auto; width: 100%;
+      text-align: center;
+      word-break: keep-all; overflow-wrap: normal;
+      line-height: 1.35;
+    }
+    .solution-code .code-text strong {
+      display: block; font-size: 7pt; font-weight: normal; color: #555;
+      margin: 0 0 0.05cm;
+    }
+    .solution-code .code-value { font-size: 9pt; letter-spacing: 0.02em; font-weight: bold; }
+    .solution-code small { display: none; }
     .footer { display: none; }
     @page { size: A4 portrait; margin: 1.2cm; }
   }
@@ -254,15 +272,15 @@
     <div class="steps-toggle"><button id="steps-btn" disabled>Lösungsweg</button></div>
     <div class="solution-code" id="code-block" hidden>
       <div class="code-text">
-        <strong>Lösungscode:</strong> <span id="code" class="code-value">—</span>
-        <small>QR-Code scannen oder Code notieren, um die Lösung später wieder einzublenden.</small>
+        <strong>Rätselcode:</strong> <span id="code" class="code-value">—</span>
+        <small>QR-Code scannen oder Code notieren, um dieses Rätsel später wieder zu öffnen.</small>
       </div>
       <div class="qr-wrap" id="qr-wrap"></div>
     </div>
   </section>
 
   <div class="reveal">
-    <input type="text" id="code-input" placeholder="Lösungscode eingeben …" autocomplete="off" spellcheck="false">
+    <input type="text" id="code-input" placeholder="Rätselcode eingeben …" autocomplete="off" spellcheck="false">
     <button id="reveal-btn">Lösung zeigen</button>
     <button id="hide-btn">Lösung verbergen</button>
   </div>
@@ -326,48 +344,210 @@ function clueText(clue) {
   return "?";
 }
 
-function encodeGrid(grid) {
-  const bits = [];
-  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
-    const v = grid[r][c];
-    for (let b = 3; b >= 0; b--) bits.push((v >> b) & 1);
+// === Puzzle-code (clues) encoding ===
+//
+// Wire format (Crockford-Base32, dash-grouped every 4 chars):
+//   4 bits  version (0)
+//   60 bits pairSum bitmap  (indices 0..29 = horizontal pairs in row-major (r*5+c),
+//                            indices 30..59 = vertical pairs in col-major (c*5+r))
+//     + 4 bits per set bit: pairSum value − 3  (range 3..17 → 0..14)
+//   12 bits totalSum bitmap (lines 0..5 = rows, 6..11 = cols)
+//     + 6 bits per set bit: totalSum value − 6  (range 6..54 → 0..48)
+//   12 bits duplicate bitmap (same line ordering)
+//     + 4 bits per set bit: duplicate value − 1  (range 1..9 → 0..8)
+//   12 bits sequence bitmap  (same line ordering)
+//     + 2 bits per set bit: type code (0=directSequence, 1=ascending, 2=descending)
+//   8  bits checksum: sum of all preceding data bytes (8-bit groups, last padded
+//                     with zeros) mod 256
+// Total size: 152–200 bits → 31–40 base32 chars depending on clue density.
+// Round-tripping: encode(decode(code)) === code (canonical clue ordering preserved).
+
+const PAIR_HORIZ_COUNT = N * (N - 1);  // 30
+const PAIR_TOTAL = 2 * PAIR_HORIZ_COUNT; // 60
+
+function pairIndexOf(cells) {
+  const [[r1, c1], [r2, c2]] = cells;
+  if (r1 === r2) return r1 * (N - 1) + Math.min(c1, c2);
+  return PAIR_HORIZ_COUNT + c1 * (N - 1) + Math.min(r1, r2);
+}
+function pairCellsFromIndex(idx) {
+  if (idx < PAIR_HORIZ_COUNT) {
+    const r = (idx / (N - 1)) | 0, c = idx % (N - 1);
+    return [[r, c], [r, c + 1]];
   }
-  let sum = 0;
-  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) sum = (sum + grid[r][c]) % 256;
-  for (let b = 7; b >= 0; b--) bits.push((sum >> b) & 1);
-  while (bits.length % 5 !== 0) bits.push(0);
-  let out = "";
-  for (let i = 0; i < bits.length; i += 5) {
-    const v = (bits[i]<<4) | (bits[i+1]<<3) | (bits[i+2]<<2) | (bits[i+3]<<1) | bits[i+4];
-    out += ALPHABET[v];
-  }
-  return out.match(/.{1,4}/g).join("-");
+  const off = idx - PAIR_HORIZ_COUNT;
+  const c = (off / (N - 1)) | 0, r = off % (N - 1);
+  return [[r, c], [r + 1, c]];
 }
 
-function decodeCode(code) {
-  if (!code) return null;
-  const clean = code.toUpperCase().replace(/[^A-Z0-9]/g, "");
-  if (clean.length < 31) return null;
+function pushBits(bits, val, n) {
+  for (let b = n - 1; b >= 0; b--) bits.push((val >> b) & 1);
+}
+function readBits(bits, pos, n) {
+  let v = 0;
+  for (let i = 0; i < n; i++) v = (v << 1) | bits[pos + i];
+  return v;
+}
+function checksum8(bits) {
+  let s = 0;
+  for (let i = 0; i < bits.length; i += 8) {
+    let byte = 0;
+    for (let b = 0; b < 8 && i + b < bits.length; b++) byte = (byte << 1) | bits[i + b];
+    s = (s + byte) & 0xFF;
+  }
+  return s;
+}
+function bitsToBase32(bits) {
+  const buf = bits.slice();
+  while (buf.length % 5 !== 0) buf.push(0);
+  let out = "";
+  for (let i = 0; i < buf.length; i += 5) {
+    const v = (buf[i] << 4) | (buf[i + 1] << 3) | (buf[i + 2] << 2) | (buf[i + 3] << 1) | buf[i + 4];
+    out += ALPHABET[v];
+  }
+  return out;
+}
+function base32ToBits(s) {
   const bits = [];
-  for (let i = 0; i < 31; i++) {
-    const v = ALPHABET.indexOf(clean[i]);
+  for (const ch of s) {
+    const v = ALPHABET.indexOf(ch);
     if (v < 0) return null;
     for (let b = 4; b >= 0; b--) bits.push((v >> b) & 1);
   }
-  const grid = Array.from({length: N}, () => Array(N).fill(0));
-  let idx = 0;
-  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
-    let v = 0;
-    for (let b = 0; b < 4; b++) v = (v << 1) | bits[idx++];
-    if (v < 1 || v > 9) return null;
-    grid[r][c] = v;
+  return bits;
+}
+
+const SEQ_TYPES = ["directSequence", "ascending", "descending"];
+
+function encodePuzzle(clues) {
+  // Bucket clues by type, keyed by their compact index.
+  const pairVal = new Map();    // pairIndex (0..59)  -> value (3..17)
+  const totalVal = new Map();   // lineIndex (0..11) -> value (6..54)
+  const dupVal = new Map();     // lineIndex (0..11) -> value (1..9)
+  const seqVal = new Map();     // lineIndex (0..11) -> type code (0/1/2)
+  const lineIdx = (scope, idx) => scope === "row" ? idx : N + idx;
+
+  for (const list of clues.rowClues.concat(clues.colClues)) for (const cl of list) {
+    if (cl.type === "pairSum")            pairVal.set(pairIndexOf(cl.cells), cl.value);
+    else if (cl.type === "totalSum")      totalVal.set(lineIdx(cl.scope, cl.index), cl.value);
+    else if (cl.type === "duplicate")     dupVal.set(lineIdx(cl.scope, cl.index), cl.value);
+    else {
+      const tc = SEQ_TYPES.indexOf(cl.type);
+      if (tc >= 0) seqVal.set(lineIdx(cl.scope, cl.index), tc);
+    }
   }
-  let cs = 0;
-  for (let b = 0; b < 8; b++) cs = (cs << 1) | bits[idx++];
-  let actual = 0;
-  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) actual = (actual + grid[r][c]) % 256;
-  if (cs !== actual) return null;
-  return grid;
+
+  const bits = [];
+  pushBits(bits, 0, 4); // version
+  // pairSum bitmap + values
+  for (let i = 0; i < PAIR_TOTAL; i++) bits.push(pairVal.has(i) ? 1 : 0);
+  for (let i = 0; i < PAIR_TOTAL; i++) if (pairVal.has(i)) pushBits(bits, pairVal.get(i) - 3, 4);
+  // totalSum bitmap + values
+  for (let i = 0; i < 2 * N; i++) bits.push(totalVal.has(i) ? 1 : 0);
+  for (let i = 0; i < 2 * N; i++) if (totalVal.has(i)) pushBits(bits, totalVal.get(i) - 6, 6);
+  // duplicate bitmap + values
+  for (let i = 0; i < 2 * N; i++) bits.push(dupVal.has(i) ? 1 : 0);
+  for (let i = 0; i < 2 * N; i++) if (dupVal.has(i)) pushBits(bits, dupVal.get(i) - 1, 4);
+  // sequence bitmap + types
+  for (let i = 0; i < 2 * N; i++) bits.push(seqVal.has(i) ? 1 : 0);
+  for (let i = 0; i < 2 * N; i++) if (seqVal.has(i)) pushBits(bits, seqVal.get(i), 2);
+  // checksum
+  pushBits(bits, checksum8(bits), 8);
+
+  return bitsToBase32(bits).match(/.{1,4}/g).join("-");
+}
+
+function decodePuzzle(code) {
+  if (!code) return null;
+  const clean = code.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!clean) return null;
+  const bits = base32ToBits(clean);
+  if (!bits) return null;
+
+  let pos = 0;
+  const need = (n) => { if (pos + n > bits.length) throw new Error("eof"); };
+  try {
+    need(4);
+    const ver = readBits(bits, pos, 4); pos += 4;
+    if (ver !== 0) return null;
+
+    // pairSum
+    need(PAIR_TOTAL);
+    const pairBits = bits.slice(pos, pos + PAIR_TOTAL); pos += PAIR_TOTAL;
+    const pairs = [];
+    for (let i = 0; i < PAIR_TOTAL; i++) if (pairBits[i]) {
+      need(4); const v = readBits(bits, pos, 4) + 3; pos += 4;
+      pairs.push({ idx: i, value: v });
+    }
+    // totalSum
+    need(2 * N);
+    const tsBits = bits.slice(pos, pos + 2 * N); pos += 2 * N;
+    const tsList = [];
+    for (let i = 0; i < 2 * N; i++) if (tsBits[i]) {
+      need(6); const v = readBits(bits, pos, 6) + 6; pos += 6;
+      if (v < 6 || v > 54) return null;
+      tsList.push({ line: i, value: v });
+    }
+    // duplicate
+    need(2 * N);
+    const dupBits = bits.slice(pos, pos + 2 * N); pos += 2 * N;
+    const dupList = [];
+    for (let i = 0; i < 2 * N; i++) if (dupBits[i]) {
+      need(4); const v = readBits(bits, pos, 4) + 1; pos += 4;
+      if (v < 1 || v > 9) return null;
+      dupList.push({ line: i, value: v });
+    }
+    // sequence
+    need(2 * N);
+    const seqBits = bits.slice(pos, pos + 2 * N); pos += 2 * N;
+    const seqList = [];
+    for (let i = 0; i < 2 * N; i++) if (seqBits[i]) {
+      need(2); const t = readBits(bits, pos, 2); pos += 2;
+      if (t > 2) return null;
+      seqList.push({ line: i, type: t });
+    }
+    // checksum
+    need(8);
+    const expected = checksum8(bits.slice(0, pos));
+    const actual = readBits(bits, pos, 8); pos += 8;
+    if (expected !== actual) return null;
+
+    // Assemble clues (matching the worker's display order:
+    // duplicate, sequence, pairSums left-to-right / top-to-bottom, totalSum)
+    const rowClues = Array.from({ length: N }, () => []);
+    const colClues = Array.from({ length: N }, () => []);
+    const addLine = (line, cl) => {
+      if (line < N) rowClues[line].push({ ...cl, scope: "row", index: line });
+      else colClues[line - N].push({ ...cl, scope: "col", index: line - N });
+    };
+    for (const p of pairs) {
+      const cells = pairCellsFromIndex(p.idx);
+      const cl = { type: "pairSum", cells, value: p.value };
+      if (cells[0][0] === cells[1][0]) rowClues[cells[0][0]].push(cl);
+      else colClues[cells[0][1]].push(cl);
+    }
+    for (const ts of tsList) addLine(ts.line, { type: "totalSum", value: ts.value });
+    for (const d of dupList) addLine(d.line, { type: "duplicate", value: d.value, mandatory: true });
+    for (const s of seqList) addLine(s.line, { type: SEQ_TYPES[s.type] });
+
+    const rank = (cl) => {
+      if (cl.type === "duplicate") return 0;
+      if (cl.type === "directSequence" || cl.type === "ascending" || cl.type === "descending") return 1;
+      if (cl.type === "pairSum") return 2 + cl.cells[0][0] * N + cl.cells[0][1];
+      return 100; // totalSum last
+    };
+    for (const list of rowClues.concat(colClues)) list.sort((a, b) => rank(a) - rank(b));
+
+    return { rowClues, colClues };
+  } catch (e) {
+    return null;
+  }
+}
+
+function countClues(clues) {
+  let n = 0;
+  for (const list of clues.rowClues.concat(clues.colClues)) n += list.length;
+  return n;
 }
 
 // === Worker code (self-contained; runs in a Web Worker) ===
@@ -1106,7 +1286,7 @@ function finishSearch() {
     el("error").textContent = `Kein lösbares Rätsel gefunden. Bitte „Neues Rätsel" erneut versuchen.`;
     return;
   }
-  const code = encodeGrid(globalBest.grid);
+  const code = encodePuzzle(globalBest.clues);
   currentPuzzle = { grid: globalBest.grid, clues: globalBest.clues, code, clueCount: globalBest.clueCount };
   renderPuzzle(currentPuzzle);
   el("print-btn").disabled = false;
@@ -1195,7 +1375,10 @@ function renderPuzzle(p) {
 
   buildGridTable();
   decorateGrid(p);
-  document.getElementById("code").textContent = p.code;
+  // Render the code with a <wbr> after every dash so print can wrap between
+  // 4-char blocks (and never inside one). Safe to use innerHTML because
+  // p.code only contains [A-Z0-9-].
+  document.getElementById("code").innerHTML = p.code.replace(/-/g, "-<wbr>");
   document.getElementById("code-input").value = p.code;
   document.getElementById("qr-wrap").innerHTML = makeQrSvg(shareUrl(p.code));
   document.getElementById("error").textContent = "";
@@ -1682,12 +1865,38 @@ function toggleSteps() { if (stepMode) exitStepMode(); else enterStepMode(); }
 document.getElementById("generate-btn").addEventListener("click", newSearch);
 document.getElementById("accept-btn").addEventListener("click", acceptNow);
 document.getElementById("extend-btn").addEventListener("click", extendSearch);
+// Load a puzzle from a code: decode → solve → set as currentPuzzle and render.
+// Returns the grid on success, null on failure (with error message side-effect).
+function loadPuzzleFromCode(code, errPrefix) {
+  const err = document.getElementById("error");
+  const clues = decodePuzzle(code);
+  if (!clues) { err.textContent = (errPrefix || "Code") + " ungültig."; return null; }
+  const tr = solveWithTrace(clues);
+  if (!tr.solved) { err.textContent = (errPrefix || "Code") + " entspricht keinem eindeutig lösbaren Rätsel."; return null; }
+  err.textContent = "";
+  const canon = encodePuzzle(clues);
+  currentPuzzle = { grid: tr.grid, clues, code: canon, clueCount: countClues(clues), trace: tr };
+  renderPuzzle(currentPuzzle);
+  document.getElementById("print-btn").disabled = false;
+  document.getElementById("steps-btn").disabled = false;
+  document.getElementById("extend-btn").hidden = true;
+  return tr.grid;
+}
+
 document.getElementById("reveal-btn").addEventListener("click", () => {
   const code = document.getElementById("code-input").value;
-  const grid = decodeCode(code);
-  const err = document.getElementById("error");
-  if (!grid) { err.textContent = "Code ungültig."; return; }
-  err.textContent = "";
+  // If the input matches the currently loaded puzzle, just reveal — no re-decode.
+  const clean = code.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const haveCurrent = currentPuzzle &&
+    currentPuzzle.code.replace(/[^A-Z0-9]/g, "") === clean && clean.length > 0;
+  let grid;
+  if (haveCurrent) {
+    document.getElementById("error").textContent = "";
+    grid = currentPuzzle.grid;
+  } else {
+    grid = loadPuzzleFromCode(code, "Code");
+    if (!grid) return;
+  }
   exitStepMode();
   showSolution(grid);
 });
@@ -1707,16 +1916,14 @@ document.getElementById("step-list").addEventListener("click", (e) => {
   stopPlay(); stepIndex = k; renderStep();
 });
 
-// If URL contains ?code=…, auto-fill and reveal the solution
+// If URL contains ?code=…, auto-fill the input and load the puzzle.
+// The puzzle is shown empty — the recipient solves it (or clicks "Lösung zeigen").
 (function applyCodeFromUrl() {
   const params = new URLSearchParams(location.search);
   const code = params.get("code");
   if (!code) return;
-  const grid = decodeCode(code);
-  const errorEl = document.getElementById("error");
   document.getElementById("code-input").value = code;
-  if (!grid) { errorEl.textContent = "Code aus URL ungültig."; return; }
-  showSolution(grid);
+  loadPuzzleFromCode(code, "Code aus URL");
 })();
 </script>
 </body>

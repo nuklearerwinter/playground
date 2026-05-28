@@ -67,9 +67,15 @@ Architectural points that are non-obvious from the code:
   generator pre-fixes 0–3 lines (count from config / random) as sequences
   before backtracking the rest; `pickClues` protects up to `cfg.numSequences`
   of them (see the clue-config bullet above).
-- **The solution code is a 31-char Crockford-Base32 string with an 8-bit
-  checksum.** If you change the grid size or value range, the code format
-  has to change too (`encodeGrid`/`decodeCode` in the main thread).
+- **The shareable code is a *puzzle* code (not a solution code).** It encodes
+  all clues — pairSum bitmap (60 bits) + 4-bit values, totalSum/duplicate/
+  sequence bitmaps (12 bits each) + their values, 4-bit version, 8-bit
+  checksum — in Crockford-Base32, dash-grouped every 4 chars. Length 31–42
+  chars depending on clue density. The grid is **never** stored in the code;
+  the recipient reconstructs it by running `solveWithTrace` on the decoded
+  clues (the generator guarantees deducibility). See `encodePuzzle` /
+  `decodePuzzle` in the main thread. If you change clue types, the grid size,
+  or the value range, bump the version nibble and add a branch.
 - **Step-by-step solution view (`solveWithTrace`).** A main-thread mirror of
   `logicalSolve` that solves from the **clues only** (never reads
   `currentPuzzle.grid`) and records each rule application as a step
