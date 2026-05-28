@@ -19,6 +19,41 @@
   .settings-grid { display: grid; grid-template-columns: max-content max-content; gap: 0.4em 0.7em; align-items: center; margin: 0.6em 0 0; }
   .settings-grid select { font-family: inherit; font-size: 0.95em; padding: 0.15em 0.3em; border: 1px solid #bbb; border-radius: 4px; }
   .settings-note { color: #777; font-size: 0.82em; line-height: 1.35; margin: 0.6em 0 0; }
+
+  /* Manual puzzle entry: a <details> panel mirroring the settings style,
+     with two columns of inputs (rows A-F | cols 1-6) and action buttons. */
+  .manual-entry { margin: 0.8em 0; font-size: 0.95em; border: 1px solid #ddd; border-radius: 5px; padding: 0.4em 0.8em; background: #fafafa; }
+  .manual-entry summary { cursor: pointer; color: var(--accent); font-weight: bold; padding: 0.2em 0; }
+  .manual-hint { margin: 0.5em 0 0.6em; color: #555; font-size: 0.9em; line-height: 1.35; }
+  .manual-hint code { background: #eee; padding: 0 0.25em; border-radius: 2px; font-size: 0.95em; }
+  .link-btn { background: none; border: none; color: var(--accent); padding: 0 0.2em; font-weight: bold; cursor: pointer; font-size: inherit; box-shadow: none; }
+  .link-btn:hover { text-decoration: underline; }
+  .manual-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.4em 1.2em; }
+  .manual-section h4 { margin: 0.3em 0 0.4em; font-size: 0.95em; color: #333; }
+  .manual-line { display: flex; align-items: center; gap: 0.4em; margin: 0.18em 0; }
+  .manual-line label { display: inline-block; width: 1.3em; font-weight: bold; color: #444; text-align: right; flex: 0 0 auto; }
+  .manual-line input { flex: 1 1 auto; min-width: 0; padding: 0.32em 0.45em; border: 1px solid #ccc; border-radius: 3px; font-family: "Courier New", monospace; font-size: 0.92em; background: white; }
+  .manual-line input.field-bad { border-color: #c33; background: #fff4f4; }
+  .manual-actions { margin: 0.7em 0 0.2em; display: flex; flex-wrap: wrap; gap: 0.4em; }
+  .manual-actions button { padding: 0.5em 0.9em; font-size: 0.95em; }
+  .manual-error { color: #c33; min-height: 1.2em; margin: 0.4em 0 0; font-style: italic; font-size: 0.92em; white-space: pre-line; }
+  @media (max-width: 600px) { .manual-grid { grid-template-columns: 1fr; gap: 0.2em 0; } }
+
+  /* Syntax-help popup. */
+  .syntax-dialog { border: 1px solid #aaa; border-radius: 6px; padding: 1em 1.2em; max-width: 38em; box-shadow: 0 10px 40px rgba(0,0,0,0.18); }
+  .syntax-dialog::backdrop { background: rgba(0,0,0,0.35); }
+  .syntax-dialog h3 { margin: 0 0 0.6em; color: var(--accent); }
+  .syntax-table { width: 100%; border-collapse: collapse; font-size: 0.92em; }
+  .syntax-table th, .syntax-table td { text-align: left; padding: 0.28em 0.4em; vertical-align: top; }
+  .syntax-table thead th { border-bottom: 1px solid #bbb; color: #444; }
+  .syntax-table tbody tr:nth-child(2n) { background: #f5f5f5; }
+  .syntax-table code { background: #eee; padding: 0 0.25em; border-radius: 2px; font-size: 0.95em; }
+  .syntax-notes { margin: 0.7em 0 0; padding-left: 1.1em; font-size: 0.9em; color: #444; line-height: 1.4; }
+  .syntax-notes code { background: #eee; padding: 0 0.2em; border-radius: 2px; }
+  .syntax-example { margin: 0.5em 0; color: #444; font-size: 0.92em; }
+  .syntax-example code { background: #eee; padding: 0.05em 0.3em; border-radius: 2px; }
+  .syntax-dialog form { margin: 0.8em 0 0; text-align: right; }
+  .syntax-dialog form button { padding: 0.45em 1.2em; }
   button { display: inline-flex; align-items: center; justify-content: center; gap: 0.3em; line-height: 1; padding: 0.55em 1.1em; font-size: 1em; cursor: pointer; margin: 0.2em 0.2em; border-radius: 4px; border: 1.5px solid var(--accent); background: white; color: var(--accent); font-family: inherit; box-sizing: border-box; }
   button:hover:not(:disabled) { background: var(--accent); color: white; }
   button:disabled { opacity: 0.5; cursor: progress; }
@@ -134,6 +169,8 @@
   .solution-code small { display: block; color: #666; margin-top: 0.3em; font-family: Georgia, serif; }
   .solution-code .qr-wrap { flex: 0 0 auto; }
   .solution-code .qr-wrap svg { display: block; width: 130px; height: 130px; background: white; padding: 4px; border-radius: 3px; }
+  .solution-code .qr-wrap a.qr-link { display: inline-block; text-decoration: none; color: inherit; line-height: 0; border-radius: 3px; }
+  .solution-code .qr-wrap a.qr-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .reveal { display: flex; gap: 0.4em; flex-wrap: wrap; align-items: center; margin: 1em 0; }
   .reveal input { padding: 0.55em 0.6em; font-family: "Courier New", monospace; flex: 1 1 12em; min-width: 0; border: 1px solid #bbb; border-radius: 4px; font-size: 1em; }
   #error { color: #c33; min-height: 1.2em; margin: 0.3em 0; font-style: italic; }
@@ -284,6 +321,64 @@
     <button id="reveal-btn">Lösung zeigen</button>
     <button id="hide-btn">Lösung verbergen</button>
   </div>
+  <details class="manual-entry" id="manual-entry">
+    <summary>Rätsel-Editor</summary>
+    <p class="manual-hint">
+      Pro Reihe und Spalte ein Feld. Mehrere Hinweise mit <code>;</code> oder <code>,</code> trennen.
+      <button type="button" id="syntax-help-btn" class="link-btn">Syntax-Hilfe&nbsp;▾</button>
+    </p>
+    <div class="manual-grid">
+      <div class="manual-section">
+        <h4>Reihen</h4>
+        <div class="manual-line"><label for="m-r-0">A:</label><input id="m-r-0" type="text" data-kind="row" data-idx="0" autocomplete="off" spellcheck="false"></div>
+        <div class="manual-line"><label for="m-r-1">B:</label><input id="m-r-1" type="text" data-kind="row" data-idx="1" autocomplete="off" spellcheck="false"></div>
+        <div class="manual-line"><label for="m-r-2">C:</label><input id="m-r-2" type="text" data-kind="row" data-idx="2" autocomplete="off" spellcheck="false"></div>
+        <div class="manual-line"><label for="m-r-3">D:</label><input id="m-r-3" type="text" data-kind="row" data-idx="3" autocomplete="off" spellcheck="false"></div>
+        <div class="manual-line"><label for="m-r-4">E:</label><input id="m-r-4" type="text" data-kind="row" data-idx="4" autocomplete="off" spellcheck="false"></div>
+        <div class="manual-line"><label for="m-r-5">F:</label><input id="m-r-5" type="text" data-kind="row" data-idx="5" autocomplete="off" spellcheck="false"></div>
+      </div>
+      <div class="manual-section">
+        <h4>Spalten</h4>
+        <div class="manual-line"><label for="m-c-0">1:</label><input id="m-c-0" type="text" data-kind="col" data-idx="0" autocomplete="off" spellcheck="false"></div>
+        <div class="manual-line"><label for="m-c-1">2:</label><input id="m-c-1" type="text" data-kind="col" data-idx="1" autocomplete="off" spellcheck="false"></div>
+        <div class="manual-line"><label for="m-c-2">3:</label><input id="m-c-2" type="text" data-kind="col" data-idx="2" autocomplete="off" spellcheck="false"></div>
+        <div class="manual-line"><label for="m-c-3">4:</label><input id="m-c-3" type="text" data-kind="col" data-idx="3" autocomplete="off" spellcheck="false"></div>
+        <div class="manual-line"><label for="m-c-4">5:</label><input id="m-c-4" type="text" data-kind="col" data-idx="4" autocomplete="off" spellcheck="false"></div>
+        <div class="manual-line"><label for="m-c-5">6:</label><input id="m-c-5" type="text" data-kind="col" data-idx="5" autocomplete="off" spellcheck="false"></div>
+      </div>
+    </div>
+    <div class="manual-actions">
+      <button type="button" id="manual-load-btn">Rätsel laden</button>
+      <button type="button" id="manual-example-btn">Beispiel laden</button>
+      <button type="button" id="manual-clear-btn">Felder leeren</button>
+    </div>
+    <div id="manual-error" class="manual-error"></div>
+  </details>
+
+  <dialog id="syntax-dialog" class="syntax-dialog">
+    <h3>Hinweis-Syntax</h3>
+    <table class="syntax-table">
+      <thead><tr><th>Hinweis</th><th>Eingabe</th><th>Beispiel</th></tr></thead>
+      <tbody>
+        <tr><td>Paarsumme</td><td><code>Zelle+Zelle=Wert</code></td><td><code>A3+A4=11</code></td></tr>
+        <tr><td>Gesamtsumme</td><td><code>SUM=Wert</code></td><td><code>SUM=29</code></td></tr>
+        <tr><td>Doppelte Zahl</td><td><code>WertxAnzahl</code>, <code>Wertx</code>, <code>AnzahlxWert</code> oder <code>Wert²</code></td><td><code>5x2</code>, <code>5x</code>, <code>2x5</code>, <code>5²</code></td></tr>
+        <tr><td>Direkt aufsteigend (lückenlos)</td><td><code>RUN ASC</code></td><td><code>RUN ASC</code></td></tr>
+        <tr><td>Direkt absteigend (lückenlos)</td><td><code>RUN DESC</code></td><td><code>RUN DESC</code></td></tr>
+        <tr><td>Aufsteigend (mit Lücken)</td><td><code>ASC</code></td><td><code>ASC</code></td></tr>
+        <tr><td>Absteigend (mit Lücken)</td><td><code>DESC</code></td><td><code>DESC</code></td></tr>
+      </tbody>
+    </table>
+    <ul class="syntax-notes">
+      <li>Mehrere Hinweise pro Linie mit <code>;</code> oder <code>,</code> trennen. Leerzeichen sind beliebig, Groß-/Kleinschreibung egal.</li>
+      <li><b>Paarzellen</b> müssen beide in der aktuellen Linie liegen und orthogonal benachbart sein. Im Reihe-A-Feld sind also nur <code>A?+A?</code>-Paare gültig, im Spalte-3-Feld nur <code>?3+?3</code>.</li>
+      <li>Bei <b>RUN/ASC/DESC</b> und <b>SUM</b> ist die Linie bereits durch das Feld gegeben — also kein Argument für die Linie nötig.</li>
+      <li>Felder, in denen die Linie keinen Hinweis hat, einfach leer lassen.</li>
+    </ul>
+    <p class="syntax-example"><b>Beispiel</b> für Reihe A: <code>A3+A4=11; A5+A6=7; RUN ASC; SUM=27</code></p>
+    <form method="dialog"><button type="submit">Schließen</button></form>
+  </dialog>
+
   <div id="error"></div>
   <div class="footer">LOGISCH Spezial – Generator</div>
 
@@ -332,6 +427,10 @@ function clueText(clue) {
       return clue.scope === "row"
         ? "Die Zahlen sind von links nach rechts direkt aufeinanderfolgend angeordnet."
         : "Die Zahlen sind von oben nach unten direkt aufeinanderfolgend angeordnet.";
+    case "directDescending":
+      return clue.scope === "row"
+        ? "Die Zahlen sind von links nach rechts direkt absteigend angeordnet."
+        : "Die Zahlen sind von oben nach unten direkt absteigend angeordnet.";
     case "ascending":
       return clue.scope === "row"
         ? "Die Zahlen sind von links nach rechts aufsteigend angeordnet (ggf. mit Lücken)."
@@ -356,7 +455,8 @@ function clueText(clue) {
 //   12 bits duplicate bitmap (same line ordering)
 //     + 4 bits per set bit: duplicate value − 1  (range 1..9 → 0..8)
 //   12 bits sequence bitmap  (same line ordering)
-//     + 2 bits per set bit: type code (0=directSequence, 1=ascending, 2=descending)
+//     + 2 bits per set bit: type code (0=directSequence, 1=ascending,
+//                                       2=descending, 3=directDescending)
 //   8  bits checksum: sum of all preceding data bytes (8-bit groups, last padded
 //                     with zeros) mod 256
 // Total size: 152–200 bits → 31–40 base32 chars depending on clue density.
@@ -417,7 +517,7 @@ function base32ToBits(s) {
   return bits;
 }
 
-const SEQ_TYPES = ["directSequence", "ascending", "descending"];
+const SEQ_TYPES = ["directSequence", "ascending", "descending", "directDescending"];
 
 function encodePuzzle(clues) {
   // Bucket clues by type, keyed by their compact index.
@@ -503,7 +603,7 @@ function decodePuzzle(code) {
     const seqList = [];
     for (let i = 0; i < 2 * N; i++) if (seqBits[i]) {
       need(2); const t = readBits(bits, pos, 2); pos += 2;
-      if (t > 2) return null;
+      if (t > 3) return null;
       seqList.push({ line: i, type: t });
     }
     // checksum
@@ -532,7 +632,7 @@ function decodePuzzle(code) {
 
     const rank = (cl) => {
       if (cl.type === "duplicate") return 0;
-      if (cl.type === "directSequence" || cl.type === "ascending" || cl.type === "descending") return 1;
+      if (cl.type === "directSequence" || cl.type === "directDescending" || cl.type === "ascending" || cl.type === "descending") return 1;
       if (cl.type === "pairSum") return 2 + cl.cells[0][0] * N + cl.cells[0][1];
       return 100; // totalSum last
     };
@@ -585,6 +685,10 @@ function workerCode() {
     for (let i = 1; i < vals.length; i++) if (vals[i] !== vals[i-1] + 1) return false;
     return true;
   }
+  function isDirectDescending(vals) {
+    for (let i = 1; i < vals.length; i++) if (vals[i] !== vals[i-1] - 1) return false;
+    return true;
+  }
   function isAscending(vals) {
     for (let i = 1; i < vals.length; i++) if (vals[i] <= vals[i-1]) return false;
     return true;
@@ -629,12 +733,19 @@ function workerCode() {
       const key = (isRow ? "r" : "c") + lineIdx;
       if (used.has(key)) continue;
       used.add(key);
+      // Distribution: ~17.5% direct asc, ~17.5% direct desc, ~33% asc-w-gaps,
+      // ~32% desc-w-gaps — same overall "direct vs gappy" balance as before,
+      // but the direct half is now split between both directions.
       const roll = Math.random();
       let type, values;
-      if (roll < 0.35) {
+      if (roll < 0.175) {
         const k = 1 + Math.floor(Math.random() * 4);
         values = [k, k+1, k+2, k+3, k+4, k+5];
         type = "directSequence";
+      } else if (roll < 0.35) {
+        const k = 1 + Math.floor(Math.random() * 4);
+        values = [k+5, k+4, k+3, k+2, k+1, k];
+        type = "directDescending";
       } else {
         const all = [1,2,3,4,5,6,7,8,9];
         for (let i = all.length - 1; i > 0; i--) {
@@ -737,6 +848,7 @@ function workerCode() {
     }
     list.push({ type: "totalSum", scope: "row", index: r, value: sumOf(vals) });
     if (isDirectSequence(vals)) list.push({ type: "directSequence", scope: "row", index: r });
+    else if (isDirectDescending(vals)) list.push({ type: "directDescending", scope: "row", index: r });
     else if (isAscending(vals)) list.push({ type: "ascending", scope: "row", index: r });
     else if (isDescending(vals)) list.push({ type: "descending", scope: "row", index: r });
     return list;
@@ -751,6 +863,7 @@ function workerCode() {
     }
     list.push({ type: "totalSum", scope: "col", index: c, value: sumOf(vals) });
     if (isDirectSequence(vals)) list.push({ type: "directSequence", scope: "col", index: c });
+    else if (isDirectDescending(vals)) list.push({ type: "directDescending", scope: "col", index: c });
     else if (isAscending(vals)) list.push({ type: "ascending", scope: "col", index: c });
     else if (isDescending(vals)) list.push({ type: "descending", scope: "col", index: c });
     return list;
@@ -795,7 +908,7 @@ function workerCode() {
         pairs.push({ a: a, b: b, value: cl.value });
       } else if (cl.type === "totalSum") {
         totals.push({ cells: clueCells(cl), value: cl.value });
-      } else if (cl.type === "directSequence" || cl.type === "ascending" || cl.type === "descending") {
+      } else if (cl.type === "directSequence" || cl.type === "directDescending" || cl.type === "ascending" || cl.type === "descending") {
         seqs.push({ cells: clueCells(cl), type: cl.type });
       }
     }
@@ -931,6 +1044,11 @@ function workerCode() {
             restrict(cells[k+1], (domains[cells[k]] << 1) & FULL_DOMAIN);
             restrict(cells[k], domains[cells[k+1]] >> 1);
           }
+        } else if (s.type === "directDescending") {
+          for (let k = 0; k < cells.length - 1; k++) {
+            restrict(cells[k+1], domains[cells[k]] >> 1);
+            restrict(cells[k], (domains[cells[k+1]] << 1) & FULL_DOMAIN);
+          }
         } else if (s.type === "ascending") {
           for (let k = 0; k < cells.length - 1; k++) {
             const mn = minV(domains[cells[k]]);
@@ -976,7 +1094,7 @@ function workerCode() {
   // logicalSolve is the single source of truth here (no backtracking needed).
   function pickClues(grid, cfg) {
     const cands = buildCandidateClues(grid);
-    function isSeqType(t) { return t === "directSequence" || t === "ascending" || t === "descending"; }
+    function isSeqType(t) { return t === "directSequence" || t === "directDescending" || t === "ascending" || t === "descending"; }
 
     // Start with ALL candidate clues, then remove as many as possible while
     // the puzzle stays deducible. Fewer remaining clues ⇒ harder.
@@ -1380,9 +1498,53 @@ function renderPuzzle(p) {
   // p.code only contains [A-Z0-9-].
   document.getElementById("code").innerHTML = p.code.replace(/-/g, "-<wbr>");
   document.getElementById("code-input").value = p.code;
-  document.getElementById("qr-wrap").innerHTML = makeQrSvg(shareUrl(p.code));
+  // Wrap the QR in a relative-link <a> so clicking (or right-click → copy
+  // address) navigates to ?code=… on the current page. The SVG inside the QR
+  // encodes the absolute share URL (for scanners); the <a> uses the relative
+  // form so the link works regardless of where the file is hosted.
+  document.getElementById("qr-wrap").innerHTML =
+    `<a class="qr-link" href="?code=${encodeURIComponent(p.code)}" title="Diesen Rätsel-Link öffnen">${makeQrSvg(shareUrl(p.code))}</a>`;
   document.getElementById("error").textContent = "";
   clearGridCells();
+  // Mirror the loaded puzzle into the manual-entry fields so users can study
+  // the syntax against a concrete example and tweak clues for re-solving.
+  syncManualFieldsFromCurrent(p);
+}
+
+function fmtClueForInput(cl) {
+  if (cl.type === "pairSum") {
+    const a = ROW_LABELS[cl.cells[0][0]] + COL_LABELS[cl.cells[0][1]];
+    const b = ROW_LABELS[cl.cells[1][0]] + COL_LABELS[cl.cells[1][1]];
+    return `${a}+${b}=${cl.value}`;
+  }
+  switch (cl.type) {
+    case "totalSum":         return `SUM=${cl.value}`;
+    case "duplicate":        return `${cl.value}x2`;
+    case "directSequence":   return "RUN ASC";
+    case "directDescending": return "RUN DESC";
+    case "ascending":        return "ASC";
+    case "descending":       return "DESC";
+  }
+  return "";
+}
+function fmtLineForInput(clues) {
+  return clues.map(fmtClueForInput).filter(s => s).join("; ");
+}
+function syncManualFieldsFromCurrent(p) {
+  // Tolerant: called from renderPuzzle, may be called before the manual-entry
+  // markup exists (unlikely, but stay defensive).
+  if (!p || !p.clues) return;
+  for (let r = 0; r < N; r++) {
+    const inp = document.getElementById("m-r-" + r); if (!inp) return;
+    inp.value = fmtLineForInput(p.clues.rowClues[r]);
+    inp.classList.remove("field-bad");
+  }
+  for (let c = 0; c < N; c++) {
+    const inp = document.getElementById("m-c-" + c); if (!inp) return;
+    inp.value = fmtLineForInput(p.clues.colClues[c]);
+    inp.classList.remove("field-bad");
+  }
+  const errBox = document.getElementById("manual-error"); if (errBox) errBox.textContent = "";
 }
 
 function showSolution(grid) {
@@ -1443,7 +1605,9 @@ function decorateGrid(p) {
     switch (cl.type) {
       case "totalSum":   return `<span class="rb sum" title="Summe aller sechs Zahlen"><b>Σ</b>${cl.value}</span>`;
       case "directSequence":
-        return `<span class="rb seq" title="direkt aufeinanderfolgend (lückenlos)">${cl.scope === "row" ? ICON.solidR : ICON.solidD}</span>`;
+        return `<span class="rb seq" title="direkt aufsteigend (lückenlos)">${cl.scope === "row" ? ICON.solidR : ICON.solidD}</span>`;
+      case "directDescending":
+        return `<span class="rb seq" title="direkt absteigend (lückenlos)">${cl.scope === "row" ? ICON.solidL : ICON.solidU}</span>`;
       case "ascending":
         return `<span class="rb seq" title="aufsteigend (mit Lücken erlaubt)">${cl.scope === "row" ? ICON.dotR : ICON.dotD}</span>`;
       case "descending":
@@ -1453,7 +1617,7 @@ function decorateGrid(p) {
     }
   }
   function chipsFor(list) {
-    const order = { duplicate: 0, totalSum: 1, directSequence: 2, ascending: 2, descending: 2 };
+    const order = { duplicate: 0, totalSum: 1, directSequence: 2, directDescending: 2, ascending: 2, descending: 2 };
     return list.filter(cl => cl.type in order).slice().sort((a, b) => order[a.type] - order[b.type]).map(chipHtml).join("");
   }
   for (let r = 0; r < N; r++) {
@@ -1497,7 +1661,7 @@ function solveWithTrace(clues) {
       pairs.push({ a: cl.cells[0][0] * N + cl.cells[0][1], b: cl.cells[1][0] * N + cl.cells[1][1], value: cl.value });
     } else if (cl.type === "totalSum") {
       totals.push({ cells: clueCellList(cl), value: cl.value, scope: cl.scope, index: cl.index });
-    } else if (cl.type === "directSequence" || cl.type === "ascending" || cl.type === "descending") {
+    } else if (cl.type === "directSequence" || cl.type === "directDescending" || cl.type === "ascending" || cl.type === "descending") {
       seqs.push({ cells: clueCellList(cl), type: cl.type, scope: cl.scope, index: cl.index });
     }
   }
@@ -1613,13 +1777,14 @@ function solveWithTrace(clues) {
     // 6. Sequenzen
     for (const s of seqs) {
       const cells = s.cells;
-      const word = s.type === "directSequence" ? "direkt aufeinanderfolgend" : (s.type === "ascending" ? "aufsteigend" : "absteigend");
       begin();
       if (s.type === "directSequence") {
         for (let k = 0; k < cells.length - 1; k++) { keep(cells[k + 1], (domains[cells[k]] << 1) & FULL); keep(cells[k], domains[cells[k + 1]] >> 1); }
+      } else if (s.type === "directDescending") {
+        for (let k = 0; k < cells.length - 1; k++) { keep(cells[k + 1], domains[cells[k]] >> 1); keep(cells[k], (domains[cells[k + 1]] << 1) & FULL); }
       } else if (s.type === "ascending") {
         for (let k = 0; k < cells.length - 1; k++) { const mn = minV(domains[cells[k]]); let m1 = 0; for (let v = mn + 1; v <= 9; v++) m1 |= bit(v); keep(cells[k + 1], m1); const mx = maxV(domains[cells[k + 1]]); let m2 = 0; for (let v = 1; v <= mx - 1; v++) m2 |= bit(v); keep(cells[k], m2); }
-      } else {
+      } else { // descending (with gaps)
         for (let k = 0; k < cells.length - 1; k++) { const mx = maxV(domains[cells[k]]); let m1 = 0; for (let v = 1; v <= mx - 1; v++) m1 |= bit(v); keep(cells[k + 1], m1); const mn = minV(domains[cells[k + 1]]); let m2 = 0; for (let v = mn + 1; v <= 9; v++) m2 |= bit(v); keep(cells[k], m2); }
       }
       commit("Diese Werte passen nicht mehr in die geforderte Reihenfolge.", "sequence",
@@ -1686,8 +1851,12 @@ function clueHeadHtml(step) {
     case "totalSum":
       return `<span class="chip sum"><b>Σ ${scopeLabel(cl)} = ${cl.value}</b></span>`;
     case "sequence": {
-      const arrow = cl.kind === "directSequence" ? "→" : (cl.kind === "ascending" ? "↑" : "↓");
-      const word = cl.kind === "directSequence" ? "direkt aufeinanderfolgend" : (cl.kind === "ascending" ? "aufsteigend" : "absteigend");
+      const arrow = (cl.kind === "directSequence" || cl.kind === "ascending") ? "↑"
+                  : (cl.kind === "directDescending" || cl.kind === "descending") ? "↓" : "→";
+      const word = cl.kind === "directSequence" ? "direkt aufsteigend"
+                 : cl.kind === "directDescending" ? "direkt absteigend"
+                 : cl.kind === "ascending" ? "aufsteigend (mit Lücken)"
+                 : "absteigend (mit Lücken)";
       return `<span class="chip seq">${arrow} <b>${scopeLabel(cl)}</b> · ${word}</span>`;
     }
     case "dup-hidden-row":
@@ -1746,6 +1915,15 @@ function combosHtmlForStep(step, dom) {
         let ok = true;
         for (let k=0; k<6; k++) if (!(doms[k] & (1<<(s+k-1)))) { ok=false; break; }
         if (ok) out.push([s, s+5]);
+      }
+      return listOrCount(out, c => `<b>${c[0]}–${c[1]}</b>`, "Sequenzen");
+    }
+    if (cl.kind === "directDescending") {
+      // Start at the highest value s (6..9); cell k must hold s-k.
+      for (let s=6; s<=9; s++) {
+        let ok = true;
+        for (let k=0; k<6; k++) if (!(doms[k] & (1<<(s-k-1)))) { ok=false; break; }
+        if (ok) out.push([s, s-5]);
       }
       return listOrCount(out, c => `<b>${c[0]}–${c[1]}</b>`, "Sequenzen");
     }
@@ -1882,6 +2060,227 @@ function loadPuzzleFromCode(code, errPrefix) {
   document.getElementById("extend-btn").hidden = true;
   return tr.grid;
 }
+
+// === Manuelle Rätseleingabe ===
+//
+// Pro Reihe/Spalte ein Input-Feld; mehrere Clues mit ';' oder ',' getrennt.
+// Grammar (case-insensitive, whitespace-flexible):
+//   line     = clue ((';'|',') clue)*
+//   clue     = pairSum | totalSum | duplicate | sequence
+//   pairSum  = CELL '+' CELL '=' INT       e.g. A3+A4=11
+//   totalSum = ('SUM'|'Σ') '=' INT          e.g. SUM=29
+//   duplicate = INT 'x' INT? | INT '²'      e.g. 5x2 / 5x / 2x5 / 5²
+//   sequence = 'RUN' 'ASC' | 'RUN' 'DESC' | 'ASC' | 'DESC'
+//   CELL     = [A-F] [1-6]
+//
+// parseManualLine returns { ok, clues, errors }. The line context (kind, idx)
+// determines which pairs are accepted (row-A field → only A?+A? pairs; col-3
+// field → only ?3+?3 pairs).
+
+const MANUAL_EXAMPLE = {
+  rows: [
+    "DESC",
+    "B2+B3=12; SUM=32",
+    "C4+C5=13",
+    "1x2",
+    "RUN DESC",
+    "ASC",
+  ],
+  cols: [
+    "",
+    "B2+C2=13",
+    "E3+F3=7; SUM=30",
+    "B4+C4=17; D4+E4=10",
+    "5x2",
+    "B6+C6=11; C6+D6=15; D6+E6=9",
+  ],
+};
+
+function parseCell(s) {
+  // s is a string like "A3" (case already normalised). Returns [r, c] or null.
+  if (s.length !== 2) return null;
+  const r = s.charCodeAt(0) - 65;       // 'A'..'F' → 0..5
+  const c = s.charCodeAt(1) - 49;       // '1'..'6' → 0..5
+  if (r < 0 || r >= N || c < 0 || c >= N) return null;
+  return [r, c];
+}
+
+function parseManualClue(raw, kind, idx) {
+  // raw: one chunk between separators. kind: "row"|"col". idx: 0..5.
+  const s = raw.replace(/\s+/g, " ").trim().toUpperCase();
+  if (!s) return null; // caller will skip empty chunks
+  // PairSum: CELL+CELL=N
+  let m = s.match(/^([A-F])\s*([1-6])\s*\+\s*([A-F])\s*([1-6])\s*=\s*(\d+)$/);
+  if (m) {
+    const a = [m[1].charCodeAt(0) - 65, m[2].charCodeAt(0) - 49];
+    const b = [m[3].charCodeAt(0) - 65, m[4].charCodeAt(0) - 49];
+    const value = parseInt(m[5], 10);
+    // Adjacency
+    const dr = Math.abs(a[0]-b[0]), dc = Math.abs(a[1]-b[1]);
+    if (dr + dc !== 1) return { error: `Zellen ${ROW_LABELS[a[0]]}${COL_LABELS[a[1]]} und ${ROW_LABELS[b[0]]}${COL_LABELS[b[1]]} sind nicht benachbart` };
+    // Line match
+    if (kind === "row") {
+      if (a[0] !== idx || b[0] !== idx) return { error: `Paar muss in Reihe ${ROW_LABELS[idx]} liegen (beide Zellen mit ${ROW_LABELS[idx]}…)` };
+    } else {
+      if (a[1] !== idx || b[1] !== idx) return { error: `Paar muss in Spalte ${COL_LABELS[idx]} liegen (beide Zellen mit …${COL_LABELS[idx]})` };
+    }
+    // Value range
+    if (value < 3 || value > 17) return { error: `Paarsumme ${value} außerhalb von 3–17` };
+    // Canonical cell order (smaller first)
+    const cells = (a[0] < b[0] || (a[0] === b[0] && a[1] < b[1])) ? [a, b] : [b, a];
+    return { clue: { type: "pairSum", cells, value } };
+  }
+  // TotalSum: SUM=N or Σ=N
+  m = s.match(/^(?:SUM|Σ)\s*=\s*(\d+)$/);
+  if (m) {
+    const value = parseInt(m[1], 10);
+    if (value < 6 || value > 54) return { error: `Gesamtsumme ${value} außerhalb von 6–54` };
+    return { clue: { type: "totalSum", scope: kind, index: idx, value } };
+  }
+  // Duplicate: 5x2 / 5x / 2x5 / 5²
+  m = s.match(/^(\d)\s*²$/) || s.match(/^(\d)\s*[X×]\s*$/);
+  if (m) {
+    const value = parseInt(m[1], 10);
+    if (value < 1 || value > 9) return { error: `Ziffer ${value} im Duplikat außerhalb von 1–9` };
+    return { clue: { type: "duplicate", scope: kind, index: idx, value } };
+  }
+  m = s.match(/^(\d)\s*[X×]\s*(\d)$/);
+  if (m) {
+    const a = parseInt(m[1], 10), b = parseInt(m[2], 10);
+    // One of them must be 2 (the count); the other is the value (1..9, anything but 2 wins;
+    // if both are 2, value = 2). This matches the natural readings "5x2" and "2x5".
+    let value;
+    if (a === 2 && b !== 2) value = b;
+    else if (b === 2 && a !== 2) value = a;
+    else if (a === 2 && b === 2) value = 2;
+    else return { error: `Duplikat braucht Anzahl 2: ${raw.trim()}` };
+    return { clue: { type: "duplicate", scope: kind, index: idx, value } };
+  }
+  // Sequences
+  if (/^RUN\s+ASC$/.test(s)) return { clue: { type: "directSequence", scope: kind, index: idx } };
+  if (/^RUN\s+DESC$/.test(s)) return { clue: { type: "directDescending", scope: kind, index: idx } };
+  if (/^ASC$/.test(s)) return { clue: { type: "ascending", scope: kind, index: idx } };
+  if (/^DESC$/.test(s)) return { clue: { type: "descending", scope: kind, index: idx } };
+  return { error: `Hinweis nicht erkannt: ${raw.trim()}` };
+}
+
+function parseManualLine(text, kind, idx) {
+  const errors = [];
+  const clues = [];
+  if (!text.trim()) return { clues, errors };
+  for (const chunk of text.split(/[;,]/)) {
+    const parsed = parseManualClue(chunk, kind, idx);
+    if (!parsed) continue;            // empty chunk
+    if (parsed.error) { errors.push(parsed.error); continue; }
+    clues.push(parsed.clue);
+  }
+  // Line-level uniqueness: at most one totalSum/duplicate/sequence per line.
+  const counts = { totalSum: 0, duplicate: 0, sequence: 0 };
+  for (const cl of clues) {
+    if (cl.type === "totalSum") counts.totalSum++;
+    else if (cl.type === "duplicate") counts.duplicate++;
+    else if (cl.type !== "pairSum") counts.sequence++;
+  }
+  if (counts.totalSum > 1) errors.push("mehrere SUM-Hinweise — höchstens einer pro Linie");
+  if (counts.duplicate > 1) errors.push("mehrere Duplikat-Hinweise — höchstens einer pro Linie");
+  if (counts.sequence > 1) errors.push("mehrere Sequenz-Hinweise — höchstens einer pro Linie");
+  return { clues, errors };
+}
+
+function readManualFields() {
+  // Returns { clues, errors, perField }
+  const rowClues = Array.from({ length: N }, () => []);
+  const colClues = Array.from({ length: N }, () => []);
+  const perField = [];   // { id, errors }
+  let totalErrors = 0;
+  for (let r = 0; r < N; r++) {
+    const inp = document.getElementById("m-r-" + r);
+    const { clues, errors } = parseManualLine(inp.value, "row", r);
+    rowClues[r].push(...clues);
+    inp.classList.toggle("field-bad", errors.length > 0);
+    perField.push({ id: inp.id, label: "Reihe " + ROW_LABELS[r], errors });
+    totalErrors += errors.length;
+  }
+  for (let c = 0; c < N; c++) {
+    const inp = document.getElementById("m-c-" + c);
+    const { clues, errors } = parseManualLine(inp.value, "col", c);
+    colClues[c].push(...clues);
+    inp.classList.toggle("field-bad", errors.length > 0);
+    perField.push({ id: inp.id, label: "Spalte " + COL_LABELS[c], errors });
+    totalErrors += errors.length;
+  }
+  // Sort each line into the canonical display order (duplicate, sequence,
+  // pairSums by position, totalSum last) so re-encode produces a stable code.
+  const rank = (cl) => {
+    if (cl.type === "duplicate") return 0;
+    if (cl.type === "directSequence" || cl.type === "directDescending" ||
+        cl.type === "ascending" || cl.type === "descending") return 1;
+    if (cl.type === "pairSum") return 2 + cl.cells[0][0] * N + cl.cells[0][1];
+    return 100;
+  };
+  for (const list of rowClues.concat(colClues)) list.sort((a, b) => rank(a) - rank(b));
+  return { clues: { rowClues, colClues }, perField, totalErrors };
+}
+
+function loadManualPuzzle() {
+  const errBox = document.getElementById("manual-error");
+  errBox.textContent = "";
+  const { clues, perField, totalErrors } = readManualFields();
+
+  if (totalErrors > 0) {
+    const lines = [];
+    for (const f of perField) for (const e of f.errors) lines.push(`${f.label}: ${e}`);
+    errBox.textContent = lines.join("\n");
+    return;
+  }
+  if (countClues(clues) === 0) {
+    errBox.textContent = "Bitte mindestens einen Hinweis eingeben.";
+    return;
+  }
+
+  const tr = solveWithTrace(clues);
+  if (!tr.solved) {
+    errBox.textContent = "Rätsel ist mit den implementierten Regeln nicht eindeutig per Deduktion lösbar — bitte Eingabe prüfen.";
+    return;
+  }
+
+  const code = encodePuzzle(clues);
+  currentPuzzle = { grid: tr.grid, clues, code, clueCount: countClues(clues), trace: tr };
+  renderPuzzle(currentPuzzle);
+  document.getElementById("print-btn").disabled = false;
+  document.getElementById("steps-btn").disabled = false;
+  document.getElementById("extend-btn").hidden = true;
+  document.getElementById("error").textContent = "";
+  // Collapse the entry panel — the puzzle is now loaded.
+  document.getElementById("manual-entry").open = false;
+}
+
+function clearManualFields() {
+  for (let r = 0; r < N; r++) {
+    const inp = document.getElementById("m-r-" + r);
+    inp.value = ""; inp.classList.remove("field-bad");
+  }
+  for (let c = 0; c < N; c++) {
+    const inp = document.getElementById("m-c-" + c);
+    inp.value = ""; inp.classList.remove("field-bad");
+  }
+  document.getElementById("manual-error").textContent = "";
+}
+
+function loadManualExample() {
+  clearManualFields();
+  for (let r = 0; r < N; r++) document.getElementById("m-r-" + r).value = MANUAL_EXAMPLE.rows[r];
+  for (let c = 0; c < N; c++) document.getElementById("m-c-" + c).value = MANUAL_EXAMPLE.cols[c];
+}
+
+document.getElementById("manual-load-btn").addEventListener("click", loadManualPuzzle);
+document.getElementById("manual-clear-btn").addEventListener("click", clearManualFields);
+document.getElementById("manual-example-btn").addEventListener("click", loadManualExample);
+document.getElementById("syntax-help-btn").addEventListener("click", () => {
+  const dlg = document.getElementById("syntax-dialog");
+  if (typeof dlg.showModal === "function") dlg.showModal();
+  else dlg.setAttribute("open", "");
+});
 
 document.getElementById("reveal-btn").addEventListener("click", () => {
   const code = document.getElementById("code-input").value;

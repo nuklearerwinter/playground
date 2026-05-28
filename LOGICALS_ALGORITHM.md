@@ -23,9 +23,10 @@ Hinweistypen, die der Generator erzeugt:
 | `duplicate`    | „Die 5 kommt doppelt vor."                                           |
 | `pairSum`      | „A3 plus A4 ergibt 11."                                              |
 | `totalSum`     | „Die Summe aller sechs Zahlen lautet 38."                            |
-| `directSequence` | „… direkt aufeinanderfolgend angeordnet."                          |
-| `ascending`    | „… aufsteigend angeordnet (ggf. mit Lücken)."                        |
-| `descending`   | „… absteigend angeordnet (ggf. mit Lücken)."                         |
+| `directSequence`   | „… direkt aufsteigend angeordnet (lückenlos, z. B. 3-4-5-6-7-8)."  |
+| `directDescending` | „… direkt absteigend angeordnet (lückenlos, z. B. 8-7-6-5-4-3)."   |
+| `ascending`        | „… aufsteigend angeordnet (ggf. mit Lücken)."                      |
+| `descending`       | „… absteigend angeordnet (ggf. mit Lücken)."                       |
 
 ## Architektur
 
@@ -48,11 +49,12 @@ Datei-Funktionen: `decideSequences`, `applySequencesToGrid`, `generateGrid`.
 
 1. **Sequenz-Vorabbelegung**: Pro Rätsel werden 1–3 Reihen oder Spalten
    zufällig als Sequenz-Linien festgelegt (der Worker würfelt die Anzahl je
-   Versuch). Jede
-   Sequenz erhält einen zufälligen Typ (directSequence / ascending /
-   descending) und konkrete Werte:
-   - `directSequence`: ein 6er-Block aus aufeinanderfolgenden Zahlen (1–6,
+   Versuch). Jede Sequenz erhält einen zufälligen Typ und konkrete Werte
+   (Verteilung ~17,5 / 17,5 / 33 / 32 %):
+   - `directSequence`: aufeinanderfolgende Zahlen aufsteigend (1–6,
      2–7, 3–8 oder 4–9).
+   - `directDescending`: aufeinanderfolgende Zahlen absteigend
+     (6–1, 7–2, 8–3 oder 9–4).
    - `ascending` / `descending`: 6 zufällige unterschiedliche Werte aus 1–9,
      auf- bzw. absteigend sortiert.
 2. Die Sequenz-Werte werden ins Gitter eingetragen und auf Konflikte
@@ -107,9 +109,10 @@ Pro Durchlauf werden angewandt:
   nur Werte, zu denen der Partner einen passenden Komplementärwert hat.
 - **totalSum-Schrankenpropagation**: Pro Linie mit bekannter Gesamtsumme
   werden Zellwerte über Min/Max-Summen der übrigen Zellen eingegrenzt.
-- **Sequenzen**: directSequence propagiert `Zelle[k+1] = Zelle[k] + 1`
-  (per Bit-Shift), ascending/descending propagieren die Monotonie-Schranken
-  entlang der Linie.
+- **Sequenzen**: `directSequence` propagiert `Zelle[k+1] = Zelle[k] + 1`
+  (Domain per `<<1`); `directDescending` analog `Zelle[k+1] = Zelle[k] - 1`
+  (Domain per `>>1`); `ascending` / `descending` propagieren die
+  Monotonie-Schranken (Min/Max) entlang der Linie.
 
 `logicalSolve` liefert `{ solved, grid }`. `solved === true` bedeutet: alle
 36 Zellen sind auf genau einen Wert bestimmt — Rätsel deduzierbar **und**
@@ -163,7 +166,7 @@ Bit-Layout (`encodePuzzle` / `decodePuzzle`):
   gesetztem Bit (6..54 → 0..48)
 - **duplicate**: 12-Bit-Bitmap + 4 Bit pro gesetztem Bit (1..9 → 0..8)
 - **sequence**: 12-Bit-Bitmap + 2 Bit pro gesetztem Bit
-  (0=directSequence, 1=ascending, 2=descending)
+  (0=directSequence, 1=ascending, 2=descending, 3=directDescending)
 - 8 Bit Prüfsumme (Summe aller vorigen Daten-Bytes mod 256)
 
 Gesamtlänge 152–200 Bit ≙ **31–42 Base32-Zeichen** je nach Hinweisdichte
@@ -264,3 +267,46 @@ nach ~6 s ~11–12 Hinweise. Danach stark abnehmender Grenznutzen — die letzte
 1–2 Hinweise kosten überproportional Zeit, weshalb „Weiter suchen" optional
 ist. Das erste gültige Rätsel erscheint binnen Millisekunden; der
 Frühstopp beendet die Suche meist deutlich vor Ablauf des Budgets.
+
+## Manuelle Rätseleingabe
+
+Aufklappbares `<details>`-Panel im UI mit 12 Eingabefeldern (Reihen A–F,
+Spalten 1–6). Pro Linie mehrere Hinweise mit `;` oder `,` getrennt. Whitespace
+beliebig, Groß-/Kleinschreibung egal.
+
+### Syntax
+
+| Hinweistyp                          | Eingabe                                          | Beispiel       |
+|-------------------------------------|--------------------------------------------------|----------------|
+| Paarsumme                           | `Zelle+Zelle=Wert` (voll qualifiziert)           | `A3+A4=11`     |
+| Gesamtsumme der Linie               | `SUM=Wert` (auch `Σ=Wert`)                       | `SUM=29`       |
+| Doppelte Zahl                       | `Wertx2`, `Wertx`, `2xWert` oder `Wert²`         | `5x2` / `5²`   |
+| Direkt aufsteigend (lückenlos)      | `RUN ASC`                                        | `RUN ASC`      |
+| Direkt absteigend (lückenlos)       | `RUN DESC`                                       | `RUN DESC`     |
+| Aufsteigend mit Lücken              | `ASC`                                            | `ASC`          |
+| Absteigend mit Lücken               | `DESC`                                           | `DESC`         |
+
+### Validierung (`parseManualLine` → `loadManualPuzzle`)
+
+- Paarzellen müssen orthogonal benachbart sein.
+- Paarzellen müssen beide im aktuellen Linienkontext liegen
+  (Reihe-A-Feld → beide Zellen mit `A…`; Spalte-3-Feld → beide Zellen
+  mit `…3`).
+- Wertebereiche: pairSum 3–17, totalSum 6–54, duplicate 1–9.
+- Pro Linie höchstens eine totalSum / ein Duplikat / eine Sequenz.
+- Alle Feldfehler werden gesammelt und gemeinsam angezeigt; betroffene
+  Inputs bekommen die Klasse `field-bad`.
+
+### Politik bei nicht-deduzierbaren Eingaben
+
+**Hart abgelehnt** — wenn `solveWithTrace` die Clue-Menge nicht zu einer
+vollständigen Lösung propagiert, blockt der Loader mit einer Fehlermeldung
+ab. Kein Backtracking-Fallback (vgl. „Akzeptanzkriterium"-Abschnitt oben);
+Magazinrätsel sind in der Regel deduzierbar, und unser Solver-Coverage ist
+der Vertrag.
+
+### Erfolgsfall
+
+Bei akzeptiertem Rätsel: `currentPuzzle` wird mit Gitter (aus `solveWithTrace`),
+Hinweisen und frisch erzeugtem `encodePuzzle`-Code befüllt; `renderPuzzle`
+zeigt das Rätsel wie ein generiertes; der Code ist sofort teilbar (QR + URL).

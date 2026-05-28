@@ -63,19 +63,29 @@ Architectural points that are non-obvious from the code:
   until "Übernehmen". "Weiter suchen" extends by +10 s. Fewer clues ⇒ harder.
   Workers are stopped via `terminate()` (the loop has no exit).
 - **Grid generation injects sequences first.** Random fills almost never
-  produce sequence lines (`directSequence`/`ascending`/`descending`), so the
-  generator pre-fixes 0–3 lines (count from config / random) as sequences
-  before backtracking the rest; `pickClues` protects up to `cfg.numSequences`
-  of them (see the clue-config bullet above).
+  produce sequence lines, so the generator pre-fixes 0–3 lines (count from
+  config / random) as sequences before backtracking the rest; `pickClues`
+  protects up to `cfg.numSequences` of them (see the clue-config bullet above).
+- **Four sequence types.** `directSequence` (consecutive ascending, e.g.
+  3-4-5-6-7-8), `directDescending` (consecutive descending, 8-7-6-5-4-3),
+  `ascending` (with gaps), `descending` (with gaps). `decideSequences` rolls
+  among them ~17.5/17.5/33/32 %, and `buildCandidateClues` classifies most-
+  specific-first (direct asc → direct desc → asc → desc) so a 3-4-5-6-7-8 line
+  is *only* labelled `directSequence`, never both. The `logicalSolve` /
+  `solveWithTrace` propagators for the direct types are pure bit shifts
+  (`<<1` / `>>1`), the gapped types use min/max bounds.
 - **The shareable code is a *puzzle* code (not a solution code).** It encodes
   all clues — pairSum bitmap (60 bits) + 4-bit values, totalSum/duplicate/
   sequence bitmaps (12 bits each) + their values, 4-bit version, 8-bit
-  checksum — in Crockford-Base32, dash-grouped every 4 chars. Length 31–42
-  chars depending on clue density. The grid is **never** stored in the code;
-  the recipient reconstructs it by running `solveWithTrace` on the decoded
-  clues (the generator guarantees deducibility). See `encodePuzzle` /
-  `decodePuzzle` in the main thread. If you change clue types, the grid size,
-  or the value range, bump the version nibble and add a branch.
+  checksum — in Crockford-Base32, dash-grouped every 4 chars. Sequence type
+  codes: 0=directSequence, 1=ascending, 2=descending, 3=directDescending
+  (codes 0-2 are the original v0 alphabet, 3 was added without a version bump
+  since v0 was only minutes old; if you ever need a 5th sequence type, bump
+  to v1 — 2 bits are already saturated). Length 31–42 chars depending on
+  clue density. The grid is **never** stored in the code; the recipient
+  reconstructs it by running `solveWithTrace` on the decoded clues (the
+  generator guarantees deducibility). See `encodePuzzle` / `decodePuzzle` in
+  the main thread.
 - **Step-by-step solution view (`solveWithTrace`).** A main-thread mirror of
   `logicalSolve` that solves from the **clues only** (never reads
   `currentPuzzle.grid`) and records each rule application as a step
@@ -90,6 +100,27 @@ Architectural points that are non-obvious from the code:
   solution. Validate with a Node copy (extract by brace-matching;
   `/tmp/lt/trace.js`: assert solved, replayed removals == solution, no removal
   of an absent value, no emptied domain).
+- **Manual puzzle entry (`parseManualLine` / `loadManualPuzzle`).** A
+  collapsible `<details>` panel with 12 inputs (rows A–F + cols 1–6) lets
+  users transcribe magazine puzzles. Syntax per field (case-insensitive,
+  `;` or `,` separated): `A3+A4=11` (pairSum, both cells must be in the
+  current line and adjacent), `SUM=29`, `5x2`/`5x`/`2x5`/`5²` (all 4 forms
+  mean "value 5 appears twice"), `RUN ASC`/`RUN DESC`/`ASC`/`DESC`. After
+  parsing, the clues run through `solveWithTrace`; **non-deducible inputs are
+  hard-rejected** (no backtracking fallback — magazines are expected to be
+  deducible, and our solver's coverage is the contract). On success it goes
+  through `renderPuzzle` like any generated puzzle, including a freshly
+  generated `encodePuzzle`-code that makes it shareable. The "Beispiel laden"
+  button fills in `MANUAL_EXAMPLE`, a real generator output kept in the file
+  for syntax orientation. Validate with `/tmp/lt/parser.js`: assert the
+  example parses + solves, and a handful of malformed inputs are rejected
+  with the right error message. The fields are also **auto-synced** from the
+  current puzzle (via `fmtLineForInput`/`syncManualFieldsFromCurrent` called
+  at the end of `renderPuzzle`) — generated puzzles, QR loads and manual
+  entries all reformat into canonical syntax in the editor, so any loaded
+  puzzle is a working example, edit-and-reload works, and the
+  format-then-parse round-trip is lossless (validated by
+  `/tmp/lt/sync-roundtrip.js`).
 
 ## Running and testing
 
