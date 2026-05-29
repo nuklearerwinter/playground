@@ -18,7 +18,14 @@
   .settings summary { cursor: pointer; color: var(--accent); width: max-content; }
   .settings-grid { display: grid; grid-template-columns: max-content max-content; gap: 0.4em 0.7em; align-items: center; margin: 0.6em 0 0; }
   .settings-grid select { font-family: inherit; font-size: 0.95em; padding: 0.15em 0.3em; border: 1px solid #bbb; border-radius: 4px; }
+  .settings-grid .slider-row { display: flex; align-items: center; gap: 0.5em; flex-wrap: wrap; }
+  .settings-grid .slider-row input[type="range"] { width: 8em; margin: 0; }
+  .settings-grid .slider-row input[type="range"]:disabled { opacity: 0.45; }
+  .settings-grid .slider-row output { font-weight: bold; min-width: 1em; text-align: center; color: var(--accent); }
+  .settings-grid .slider-row .slider-modifier { color: #555; font-size: 0.92em; margin-left: 0.4em; cursor: pointer; }
+  .settings-grid .slider-row .slider-modifier input { margin: 0 0.3em 0 0; }
   .settings-note { color: #777; font-size: 0.82em; line-height: 1.35; margin: 0.6em 0 0; }
+  .settings-actions { margin: 0.5em 0 0; }
 
   /* Manual puzzle entry: a <details> panel mirroring the settings style,
      with two columns of inputs (rows A-F | cols 1-6) and action buttons. */
@@ -252,32 +259,34 @@
       <summary>Einstellungen</summary>
       <div class="settings-grid">
         <label for="cfg-seq">Sequenzen</label>
-        <select id="cfg-seq">
-          <option value="random">zufällig (1–3)</option>
-          <option value="0">0</option>
-          <option value="1" selected>1</option>
-          <option value="2">2</option>
-          <option value="3">3</option>
-        </select>
+        <div class="slider-row">
+          <input type="range" id="cfg-seq" min="0" max="3" step="1" value="1">
+          <output for="cfg-seq">1</output>
+          <label class="slider-modifier"><input type="checkbox" id="cfg-seq-random"> zufällig 1–3</label>
+        </div>
         <label for="cfg-totalsum">Summen-Hinweise</label>
-        <select id="cfg-totalsum">
-          <option value="0">0</option>
-          <option value="1">1</option>
-          <option value="2" selected>2</option>
-          <option value="3">3</option>
-        </select>
+        <div class="slider-row">
+          <input type="range" id="cfg-totalsum" min="0" max="3" step="1" value="2">
+          <output for="cfg-totalsum">2</output>
+        </div>
         <label for="cfg-dup">Dopplungen (max.)</label>
-        <select id="cfg-dup">
-          <option value="0">0</option>
-          <option value="1">1</option>
-          <option value="2" selected>2</option>
-          <option value="3">3</option>
-          <option value="4">4</option>
-          <option value="5">5</option>
-        </select>
+        <div class="slider-row">
+          <input type="range" id="cfg-dup" min="0" max="5" step="1" value="2">
+          <output for="cfg-dup">2</output>
+        </div>
+        <label for="cfg-mindup">Dopplungen (min.)</label>
+        <div class="slider-row">
+          <input type="range" id="cfg-mindup" min="0" max="5" step="1" value="2">
+          <output for="cfg-mindup">2</output>
+        </div>
+        <label for="cfg-fewerpair">Weniger Paarsummen</label>
+        <label><input type="checkbox" id="cfg-fewerpair" checked> mehr Linien-Summen statt vieler PairSums</label>
       </div>
       <p class="settings-note">„Summen-Hinweise" erzwingt so viele „Summe aller Zahlen"-Hinweise (kostet je ~1 Hinweis mehr).
         Strenge Werte (viele Sequenzen, wenige Dopplungen) verlängern die Suche etwas.</p>
+      <div class="settings-actions">
+        <button type="button" id="cfg-reset-btn" class="link-btn">Standardwerte wiederherstellen</button>
+      </div>
     </details>
     <div id="progress" hidden>
       <progress id="progress-bar" max="100" value="0"></progress>
@@ -707,8 +716,9 @@ function workerCode() {
     }
     return doubled <= 1;
   }
-  function gridQualityOK(grid, maxDupLines) {
+  function gridQualityOK(grid, maxDupLines, minDupLines) {
     const cap = (typeof maxDupLines === "number") ? maxDupLines : 5;
+    const floor = (typeof minDupLines === "number") ? minDupLines : 0;
     let dupLines = 0;
     for (let r = 0; r < N; r++) {
       const arr = rowOf(grid, r);
@@ -720,7 +730,7 @@ function workerCode() {
       if (!atMostOneDoubled(arr)) return false;
       if (findDuplicate(arr) !== null) dupLines++;
     }
-    return dupLines <= cap;
+    return dupLines <= cap && dupLines >= floor;
   }
 
   function decideSequences(numSequences) {
@@ -788,7 +798,7 @@ function workerCode() {
     return true;
   }
 
-  function generateGrid(numSequences, maxDupLines) {
+  function generateGrid(numSequences, maxDupLines, minDupLines) {
     const MAX_OUTER = 20;
     const MAX_INNER = 8;
     for (let outer = 0; outer < MAX_OUTER; outer++) {
@@ -832,7 +842,7 @@ function workerCode() {
           }
           return false;
         }
-        if (fill(0) && gridQualityOK(grid, maxDupLines)) return grid;
+        if (fill(0) && gridQualityOK(grid, maxDupLines, minDupLines)) return grid;
       }
     }
     return null;
@@ -1126,11 +1136,23 @@ function workerCode() {
       for (const list of selected.colClues) for (const cl of list) if (cl.type === "totalSum") n++;
       return n;
     }
-    // Removal preference during reduction: drop totalSum first (we want few of
-    // them), then pairSum, sequences last. Mandatory (duplicate) clues are
+    // Removal preference during reduction. Mandatory (duplicate) clues are
     // never removed — without them the default "all distinct" assumption is
     // wrong — and sequence clues are kept for visual variety.
+    //
+    // Two modes:
+    //   default: drop totalSum first (greedy wipes them out almost entirely),
+    //            then pairSum. Yields puzzles with ~13 pair / ~2 sum / ~1 dup.
+    //   fewerPairSums: drop pairSum first, then totalSum. Yields ~9 pair /
+    //                  ~5 sum / similar dup. Reduction yield drops ~10×
+    //                  (pairSums are mostly load-bearing) but still works
+    //                  within the tournament budget.
     function removeRank(cl) {
+      if (cfg.fewerPairSums) {
+        if (cl.type === "pairSum") return 0;
+        if (cl.type === "totalSum") return 1;
+        return 2;
+      }
       if (cl.type === "totalSum") return 0;
       if (cl.type === "pairSum") return 1;
       return 2;
@@ -1256,14 +1278,16 @@ function workerCode() {
     let best = (typeof data.threshold === "number") ? data.threshold : Infinity;
     const seqMode = cfg.numSequences;                              // "random" or 0–3
     const maxDup = (typeof cfg.maxDupLines === "number") ? cfg.maxDupLines : 5;
+    const minDup = (typeof cfg.minDupLines === "number") ? cfg.minDupLines : 0;
     const minTS = (typeof cfg.minTotalSum === "number") ? cfg.minTotalSum : 0;
+    const fewerPairSums = !!cfg.fewerPairSums;
     let sinceTick = 0;
     for (;;) {
       sinceTick++;
       const numSeq = (typeof seqMode === "number") ? seqMode : 1 + ((Math.random() * 3) | 0);
-      const grid = generateGrid(numSeq, maxDup);
+      const grid = generateGrid(numSeq, maxDup, minDup);
       if (grid) {
-        const clues = pickClues(grid, { targetClues: 0, minTotalSum: minTS, numSequences: numSeq });
+        const clues = pickClues(grid, { targetClues: 0, minTotalSum: minTS, numSequences: numSeq, fewerPairSums: fewerPairSums });
         if (clues) {
           const cc = clueCountOf(clues);
           if (cc < best) {
@@ -1314,11 +1338,17 @@ function killWorkers() {
 // Read the clue-type controls. Defaults reproduce prior behaviour:
 // sequences random 1–3, no forced totalSum, up to 5 duplicate lines.
 function readConfig() {
-  const seq = el("cfg-seq").value; // "random" or "0".."3"
+  const maxDup = parseInt(el("cfg-dup").value, 10);
+  // Clamp minDup ≤ maxDup so impossible grid targets never reach the worker.
+  // Without the clamp the worker would spin forever (every grid rejected).
+  const minDup = Math.min(parseInt(el("cfg-mindup").value, 10), maxDup);
+  const seqRandom = el("cfg-seq-random").checked;
   return {
-    numSequences: seq === "random" ? "random" : parseInt(seq, 10),
+    numSequences: seqRandom ? "random" : parseInt(el("cfg-seq").value, 10),
     minTotalSum: parseInt(el("cfg-totalsum").value, 10),
-    maxDupLines: parseInt(el("cfg-dup").value, 10),
+    maxDupLines: maxDup,
+    minDupLines: minDup,
+    fewerPairSums: el("cfg-fewerpair").checked,
   };
 }
 
@@ -2039,6 +2069,71 @@ function exitStepMode() {
   clearGridCells();
 }
 function toggleSteps() { if (stepMode) exitStepMode(); else enterStepMode(); }
+
+// Canonical default settings. HTML defaults (value/checked attrs) must match
+// these — they're the same numbers in two places, so any tweak goes here AND
+// in the markup. resetConfig() restores from here.
+const DEFAULT_CONFIG = {
+  numSequencesSlider: 1,
+  numSequencesRandom: false,
+  minTotalSum: 2,
+  maxDupLines: 2,
+  minDupLines: 2,
+  fewerPairSums: true,
+};
+function applyConfig(cfg) {
+  el("cfg-seq").value = cfg.numSequencesSlider;
+  el("cfg-seq-random").checked = cfg.numSequencesRandom;
+  el("cfg-seq").disabled = cfg.numSequencesRandom;
+  el("cfg-totalsum").value = cfg.minTotalSum;
+  el("cfg-dup").value = cfg.maxDupLines;
+  el("cfg-mindup").value = cfg.minDupLines;
+  el("cfg-fewerpair").checked = cfg.fewerPairSums;
+  // Push the new values into the live-display outputs.
+  for (const id of ["cfg-seq", "cfg-totalsum", "cfg-dup", "cfg-mindup"]) {
+    const s = el(id);
+    s.parentNode.querySelector('output[for="' + id + '"]').textContent = s.value;
+  }
+}
+function resetConfig() { applyConfig(DEFAULT_CONFIG); }
+
+// Live value display next to each slider; output is updated on drag.
+function bindSliderOutput(sliderId) {
+  const slider = el(sliderId);
+  const out = slider.parentNode.querySelector('output[for="' + sliderId + '"]');
+  if (!out) return;
+  const sync = () => out.textContent = slider.value;
+  slider.addEventListener("input", sync);
+  sync();
+}
+bindSliderOutput("cfg-seq");
+bindSliderOutput("cfg-totalsum");
+bindSliderOutput("cfg-dup");
+bindSliderOutput("cfg-mindup");
+el("cfg-reset-btn").addEventListener("click", resetConfig);
+
+// "Zufällig 1-3"-checkbox overrides the seq slider; dim slider when checked.
+el("cfg-seq-random").addEventListener("change", () => {
+  el("cfg-seq").disabled = el("cfg-seq-random").checked;
+});
+
+// Keep min-/max-dup sliders mutually consistent so readConfig's clamp never
+// silently overrides what the user sees. React on the `input` event so the
+// constraint also tracks the drag, not just the release.
+el("cfg-mindup").addEventListener("input", () => {
+  const mn = el("cfg-mindup"), mx = el("cfg-dup");
+  if (+mn.value > +mx.value) {
+    mx.value = mn.value;
+    mx.parentNode.querySelector('output[for="cfg-dup"]').textContent = mx.value;
+  }
+});
+el("cfg-dup").addEventListener("input", () => {
+  const mn = el("cfg-mindup"), mx = el("cfg-dup");
+  if (+mn.value > +mx.value) {
+    mn.value = mx.value;
+    mn.parentNode.querySelector('output[for="cfg-mindup"]').textContent = mn.value;
+  }
+});
 
 document.getElementById("generate-btn").addEventListener("click", newSearch);
 document.getElementById("accept-btn").addEventListener("click", acceptNow);

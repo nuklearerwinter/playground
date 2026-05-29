@@ -48,13 +48,21 @@ Architectural points that are non-obvious from the code:
 - **Configurable clue types via a `keep` flag.** A collapsible settings panel
   feeds a config (`readConfig`) that the main thread sends to every worker and
   reuses on "Weiter suchen": `numSequences` (`"random"` or 0–3), `minTotalSum`
-  (0–3), `maxDupLines` (0–5). `pickClues` marks up to that many sequence and
+  (0–3), `maxDupLines` (0–5), `minDupLines` (0–5, UI-clamped to ≤ maxDup),
+  `fewerPairSums` (boolean). `pickClues` marks up to that many sequence and
   totalSum clues with `keep`; kept clues (like mandatory duplicates) are never
   removed. **Sequences are NOT auto-protected anymore** — only the marked ones
   are, so coincidental sequence lines from the random fill get minimised away
   and the shown count matches the setting (rarely +1 if load-bearing).
-  `maxDupLines` is passed to `generateGrid`/`gridQualityOK`. `pairSum` is
-  deliberately not configurable (it's the deducibility backbone).
+  `maxDupLines` / `minDupLines` are passed to `generateGrid` / `gridQualityOK`
+  (a grid must have `minDup ≤ dupLines ≤ maxDup`; otherwise rejected).
+  `fewerPairSums` flips `removeRank` so pairSum tries to be dropped before
+  totalSum during reduction — shifts the typical mix from ~13 pair / 2 sum /
+  1 dup to ~9 pair / 5 sum / 2 dup (yield drops ~10× but still ample for the
+  tournament).  Current defaults: `minTotalSum=2`, `maxDupLines=2`,
+  `minDupLines=2`, `fewerPairSums=true`. `pairSum` (the clue type, not the
+  reducer knob) is deliberately not configurable — it's the deducibility
+  backbone.
 - **Difficulty = clue count = search time (no fixed presets).** The worker
   loops forever, generating + minimising and posting a puzzle only when it
   beats its fewest-clue count so far; the main thread runs ~4 such workers as
