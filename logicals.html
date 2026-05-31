@@ -261,26 +261,31 @@
           <output for="cfg-seq">1</output>
           <label class="slider-modifier"><input type="checkbox" id="cfg-seq-random"> zufällig 1–3</label>
         </div>
-        <label for="cfg-totalsum">Summen-Hinweise</label>
+        <label for="cfg-totalsum">Summen-Hinweise (min.)</label>
         <div class="slider-row">
-          <input type="range" id="cfg-totalsum" min="0" max="3" step="1" value="2">
-          <output for="cfg-totalsum">2</output>
+          <input type="range" id="cfg-totalsum" min="0" max="6" step="1" value="4">
+          <output for="cfg-totalsum">4</output>
+        </div>
+        <label for="cfg-maxtotalsum">Summen-Hinweise (max.)</label>
+        <div class="slider-row">
+          <input type="range" id="cfg-maxtotalsum" min="0" max="7" step="1" value="4">
+          <output for="cfg-maxtotalsum">4</output>
         </div>
         <label for="cfg-dup">Dopplungen (max.)</label>
         <div class="slider-row">
-          <input type="range" id="cfg-dup" min="0" max="5" step="1" value="2">
-          <output for="cfg-dup">2</output>
+          <input type="range" id="cfg-dup" min="0" max="7" step="1" value="5">
+          <output for="cfg-dup">5</output>
         </div>
         <label for="cfg-mindup">Dopplungen (min.)</label>
         <div class="slider-row">
-          <input type="range" id="cfg-mindup" min="0" max="5" step="1" value="2">
-          <output for="cfg-mindup">2</output>
+          <input type="range" id="cfg-mindup" min="0" max="7" step="1" value="3">
+          <output for="cfg-mindup">3</output>
         </div>
         <label for="cfg-fewerpair">Weniger Paarsummen</label>
-        <label><input type="checkbox" id="cfg-fewerpair" checked> mehr Linien-Summen statt vieler PairSums</label>
+        <label><input type="checkbox" id="cfg-fewerpair"> mehr Linien-Summen statt vieler PairSums</label>
       </div>
-      <p class="settings-note">„Summen-Hinweise" erzwingt so viele „Summe aller Zahlen"-Hinweise (kostet je ~1 Hinweis mehr).
-        Strenge Werte (viele Sequenzen, wenige Dopplungen) verlängern die Suche etwas.</p>
+      <p class="settings-note">„Summen-Hinweise (min./max.)" steuert das Fenster für „Summe aller Zahlen"-Hinweise; aktuelle Standardwerte (4–4) entsprechen dem Magazin-Schnitt.
+        „Dopplungen (min.)" ≥ 3 sorgt für magazintypische Cross-Line-Kopplung. Strenge Werte (viele Sequenzen, hohe Min-Dopplungen) verlängern die Suche etwas.</p>
       <div class="settings-actions">
         <button type="button" id="cfg-reset-btn" class="link-btn">Standardwerte wiederherstellen</button>
       </div>
@@ -1215,11 +1220,13 @@ function workerCode() {
       }
       return arr;
     }
-    // Effectively no cap. Was 5 ("Σ stays a rare hint"), but with the new
-    // line-feasibility rule totalSums are typically load-bearing and minimisation
-    // can't drop them below ~7 — a low cap would reject almost every grid. Will
-    // be revisited when clue-picking is reworked for magazine-style difficulty.
-    const MAX_TOTAL_SUMS = 99;
+    // Configurable totalSum cap. Magazine puzzles average ~4 totalSums per
+    // puzzle, our solver tends to keep many more because the line-feasibility
+    // DFS makes them load-bearing. The cap lets us match the magazine mix:
+    // grids whose minimisation can't get under MAX_TOTAL_SUMS are rejected,
+    // forcing pickClues to favour pairSum/duplicate scaffolding instead. A
+    // very high cap (≥ 12) effectively disables the rule.
+    const MAX_TOTAL_SUMS = (cfg && typeof cfg.maxTotalSum === "number") ? cfg.maxTotalSum : 99;
     function countTotalSums() {
       let n = 0;
       for (const list of selected.rowClues) for (const cl of list) if (cl.type === "totalSum") n++;
@@ -1371,6 +1378,7 @@ function workerCode() {
     const maxDup = (typeof cfg.maxDupLines === "number") ? cfg.maxDupLines : 5;
     const minDup = (typeof cfg.minDupLines === "number") ? cfg.minDupLines : 0;
     const minTS = (typeof cfg.minTotalSum === "number") ? cfg.minTotalSum : 0;
+    const maxTS = (typeof cfg.maxTotalSum === "number") ? cfg.maxTotalSum : 99;
     const fewerPairSums = !!cfg.fewerPairSums;
     // Tick every ~250ms (time-based, not attempt-count-based) so the UI's
     // attempt counter updates regardless of how slow individual attempts are.
@@ -1381,7 +1389,7 @@ function workerCode() {
       const numSeq = (typeof seqMode === "number") ? seqMode : 1 + ((Math.random() * 3) | 0);
       const grid = generateGrid(numSeq, maxDup, minDup);
       if (grid) {
-        const clues = pickClues(grid, { targetClues: 0, minTotalSum: minTS, numSequences: numSeq, fewerPairSums: fewerPairSums });
+        const clues = pickClues(grid, { targetClues: 0, minTotalSum: minTS, maxTotalSum: maxTS, numSequences: numSeq, fewerPairSums: fewerPairSums });
         if (clues) {
           const cc = clueCountOf(clues);
           if (cc < best) {
@@ -1438,10 +1446,13 @@ function readConfig() {
   // Clamp minDup ≤ maxDup so impossible grid targets never reach the worker.
   // Without the clamp the worker would spin forever (every grid rejected).
   const minDup = Math.min(parseInt(el("cfg-mindup").value, 10), maxDup);
+  const minTS = parseInt(el("cfg-totalsum").value, 10);
+  const maxTS = Math.max(parseInt(el("cfg-maxtotalsum").value, 10), minTS);
   const seqRandom = el("cfg-seq-random").checked;
   return {
     numSequences: seqRandom ? "random" : parseInt(el("cfg-seq").value, 10),
-    minTotalSum: parseInt(el("cfg-totalsum").value, 10),
+    minTotalSum: minTS,
+    maxTotalSum: maxTS,
     maxDupLines: maxDup,
     minDupLines: minDup,
     fewerPairSums: el("cfg-fewerpair").checked,
@@ -2253,21 +2264,23 @@ function toggleSteps() { if (stepMode) exitStepMode(); else enterStepMode(); }
 const DEFAULT_CONFIG = {
   numSequencesSlider: 1,
   numSequencesRandom: false,
-  minTotalSum: 2,
-  maxDupLines: 2,
-  minDupLines: 2,
-  fewerPairSums: true,
+  minTotalSum: 4,
+  maxTotalSum: 4,
+  maxDupLines: 5,
+  minDupLines: 3,
+  fewerPairSums: false,
 };
 function applyConfig(cfg) {
   el("cfg-seq").value = cfg.numSequencesSlider;
   el("cfg-seq-random").checked = cfg.numSequencesRandom;
   el("cfg-seq").disabled = cfg.numSequencesRandom;
   el("cfg-totalsum").value = cfg.minTotalSum;
+  el("cfg-maxtotalsum").value = cfg.maxTotalSum;
   el("cfg-dup").value = cfg.maxDupLines;
   el("cfg-mindup").value = cfg.minDupLines;
   el("cfg-fewerpair").checked = cfg.fewerPairSums;
   // Push the new values into the live-display outputs.
-  for (const id of ["cfg-seq", "cfg-totalsum", "cfg-dup", "cfg-mindup"]) {
+  for (const id of ["cfg-seq", "cfg-totalsum", "cfg-maxtotalsum", "cfg-dup", "cfg-mindup"]) {
     const s = el(id);
     s.parentNode.querySelector('output[for="' + id + '"]').textContent = s.value;
   }
@@ -2285,9 +2298,26 @@ function bindSliderOutput(sliderId) {
 }
 bindSliderOutput("cfg-seq");
 bindSliderOutput("cfg-totalsum");
+bindSliderOutput("cfg-maxtotalsum");
 bindSliderOutput("cfg-dup");
 bindSliderOutput("cfg-mindup");
 el("cfg-reset-btn").addEventListener("click", resetConfig);
+
+// Keep min-/max-totalSum mutually consistent (max ≥ min).
+el("cfg-totalsum").addEventListener("input", () => {
+  const mn = el("cfg-totalsum"), mx = el("cfg-maxtotalsum");
+  if (+mn.value > +mx.value) {
+    mx.value = mn.value;
+    mx.parentNode.querySelector('output[for="cfg-maxtotalsum"]').textContent = mx.value;
+  }
+});
+el("cfg-maxtotalsum").addEventListener("input", () => {
+  const mn = el("cfg-totalsum"), mx = el("cfg-maxtotalsum");
+  if (+mn.value > +mx.value) {
+    mn.value = mx.value;
+    mn.parentNode.querySelector('output[for="cfg-totalsum"]').textContent = mn.value;
+  }
+});
 
 // "Zufällig 1-3"-checkbox overrides the seq slider; dim slider when checked.
 el("cfg-seq-random").addEventListener("change", () => {
