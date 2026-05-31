@@ -249,12 +249,9 @@
 
   <section class="controls" id="controls">
     <button id="generate-btn">Neues Rätsel</button>
-    <button id="accept-btn" hidden>Übernehmen</button>
-    <button id="extend-btn" hidden>Weiter suchen</button>
     <button id="print-btn" disabled>Drucken</button>
-    <p class="controls-hint">Es wird einige Sekunden lang nach einem möglichst hinweisarmen,
-      eindeutig per Logik lösbaren Rätsel gesucht — je weniger Hinweise, desto schwerer.
-      Mit „Übernehmen" nehmen Sie jederzeit das aktuell beste, mit „Weiter suchen" suchen Sie nach einem noch knapperen.</p>
+    <p class="controls-hint">Es wird nach einem möglichst hinweisarmen, eindeutig per Logik lösbaren Rätsel gesucht — je weniger Hinweise, desto schwerer.
+      Die Suche läuft bis zu 5 Minuten oder bis Sie das aktuell beste Rätsel übernehmen.</p>
     <details class="settings">
       <summary>Einstellungen</summary>
       <div class="settings-grid">
@@ -291,6 +288,7 @@
     <div id="progress" hidden>
       <progress id="progress-bar" max="100" value="0"></progress>
       <span id="status">Erzeuge Rätsel …</span>
+      <button id="accept-btn" disabled>Gefundenes Rätsel verwenden</button>
     </div>
   </section>
 
@@ -917,13 +915,40 @@ function workerCode() {
         const b = cl.cells[1][0]*N + cl.cells[1][1];
         pairs.push({ a: a, b: b, value: cl.value });
       } else if (cl.type === "totalSum") {
-        totals.push({ cells: clueCells(cl), value: cl.value });
+        totals.push({ cells: clueCells(cl), value: cl.value, scope: cl.scope, index: cl.index });
       } else if (cl.type === "directSequence" || cl.type === "directDescending" || cl.type === "ascending" || cl.type === "descending") {
         seqs.push({ cells: clueCells(cl), type: cl.type });
       }
     }
     for (let r = 0; r < N; r++) for (const cl of selected.rowClues[r]) reg(cl);
     for (let c = 0; c < N; c++) for (const cl of selected.colClues[c]) reg(cl);
+    // Attach the line's duplicate-value mask to each totalSum (used by the
+    // distinct-sum propagator below). Must run after all reg() calls so the
+    // duplicate clues on the same line have been registered.
+    for (const t of totals) t.dupMask = t.scope === "row" ? rowDup[t.index] : colDup[t.index];
+
+    // Lines that need feasibility-DFS: any row/column constrained by a totalSum
+    // and/or a duplicate clue. Unconstrained lines yield no reduction. Each
+    // entry also carries a per-line snapshot of cell domains from its previous
+    // DFS run; if no domain changed since then the run is skipped (the search
+    // is deterministic in the domains, so the result would be identical).
+    const lineSearches = [];
+    function totalSumFor(scope, idx) {
+      for (const t of totals) if (t.scope === scope && t.index === idx) return t.value;
+      return -1;
+    }
+    for (let r = 0; r < N; r++) {
+      const ts = totalSumFor("row", r), dm = rowDup[r];
+      if (ts < 0 && dm === 0) continue;
+      const cells = []; for (let c = 0; c < N; c++) cells.push(r * N + c);
+      lineSearches.push({ cells: cells, dupMask: dm, totalSum: ts, snap: null });
+    }
+    for (let c = 0; c < N; c++) {
+      const ts = totalSumFor("col", c), dm = colDup[c];
+      if (ts < 0 && dm === 0) continue;
+      const cells = []; for (let r = 0; r < N; r++) cells.push(r * N + c);
+      lineSearches.push({ cells: cells, dupMask: dm, totalSum: ts, snap: null });
+    }
 
     const domains = new Int32Array(N*N).fill(FULL_DOMAIN);
     let progress = true;
@@ -1011,13 +1036,14 @@ function workerCode() {
       }
       if (bad) break;
 
-      // pairSum: arc consistency on A + B = value.
+      // pairSum: arc consistency on A + B = value. The two cells are always
+      // adjacent (parser guarantees this), so v === w is forbidden too.
       for (const p of pairs) {
         const da = domains[p.a], db = domains[p.b];
         let maskA = 0, maskB = 0;
         for (let v = 1; v <= 9; v++) {
           const w = p.value - v;
-          if (w < 1 || w > 9) continue;
+          if (w < 1 || w > 9 || w === v) continue;
           if ((da & (1 << (v-1))) && (db & (1 << (w-1)))) { maskA |= 1 << (v-1); maskB |= 1 << (w-1); }
         }
         restrict(p.a, maskA);
@@ -1043,6 +1069,66 @@ function workerCode() {
           if (bad) break;
         }
         if (bad) break;
+      }
+      if (bad) break;
+
+      // Line feasibility: for any row/column constrained by a totalSum or
+      // duplicate clue, enumerate feasible value assignments by DFS — six
+      // distinct values from 1..9, except the duplicate value (if any) appears
+      // exactly twice and at non-adjacent positions in the line. If a totalSum
+      // is given, the assignment must hit it. Then restrict each cell to values
+      // that appear in at least one feasible assignment.
+      //   Captures: (a) extreme sums collapsing the value set (Σ=39 ⇒
+      //   {4,5,6,7,8,9}), (b) duplicate-with-adjacency placements (e.g. if 5×2
+      //   in row A only has candidates A4/A5/A6, the only non-adjacent pair is
+      //   (A4,A6) → both must be 5).
+      for (const ls of lineSearches) {
+        const cells = ls.cells;
+        // Skip if no cell in this line has changed since its last DFS run.
+        if (ls.snap) {
+          let dirty = false;
+          for (let j = 0; j < 6; j++) if (domains[cells[j]] !== ls.snap[j]) { dirty = true; break; }
+          if (!dirty) continue;
+        }
+        const dupMask = ls.dupMask;
+        const target = ls.totalSum; // -1 if no totalSum clue
+        const support = [0, 0, 0, 0, 0, 0];
+        const assigned = [0, 0, 0, 0, 0, 0];
+        const usage = new Int8Array(10);
+        function search(i, sumSoFar, dupLastPos) {
+          if (i === 6) {
+            if (target >= 0 && sumSoFar !== target) return;
+            // Each duplicate value must appear EXACTLY twice (not 0 or 1).
+            for (let v = 1; v <= 9; v++) if ((dupMask & (1 << (v - 1))) && usage[v] !== 2) return;
+            for (let j = 0; j < 6; j++) support[j] |= 1 << (assigned[j] - 1);
+            return;
+          }
+          if (target >= 0) {
+            const rem = 6 - i;
+            if (sumSoFar + rem * 9 < target) return;
+            if (sumSoFar + rem * 1 > target) return;
+          }
+          const d = domains[cells[i]];
+          for (let v = 1; v <= 9; v++) {
+            const b = 1 << (v - 1);
+            if (!(d & b)) continue;
+            const maxCount = (dupMask & b) ? 2 : 1;
+            if (usage[v] >= maxCount) continue;
+            if ((dupMask & b) && dupLastPos === i - 1) continue;
+            assigned[i] = v;
+            usage[v]++;
+            const newDupLast = (dupMask & b) ? i : dupLastPos;
+            search(i + 1, sumSoFar + v, newDupLast);
+            usage[v]--;
+          }
+        }
+        search(0, 0, -2);
+        for (let j = 0; j < 6 && !bad; j++) restrict(cells[j], support[j]);
+        if (bad) break;
+        // Snapshot post-DFS domains so the next iteration can skip if nothing
+        // else changed any of these cells.
+        if (!ls.snap) ls.snap = new Int32Array(6);
+        for (let j = 0; j < 6; j++) ls.snap[j] = domains[cells[j]];
       }
       if (bad) break;
 
@@ -1129,7 +1215,11 @@ function workerCode() {
       }
       return arr;
     }
-    const MAX_TOTAL_SUMS = 5; // "Summe aller Zahlen" should stay a rare hint
+    // Effectively no cap. Was 5 ("Σ stays a rare hint"), but with the new
+    // line-feasibility rule totalSums are typically load-bearing and minimisation
+    // can't drop them below ~7 — a low cap would reject almost every grid. Will
+    // be revisited when clue-picking is reworked for magazine-style difficulty.
+    const MAX_TOTAL_SUMS = 99;
     function countTotalSums() {
       let n = 0;
       for (const list of selected.rowClues) for (const cl of list) if (cl.type === "totalSum") n++;
@@ -1270,8 +1360,9 @@ function workerCode() {
   // rebalancing), and posts a puzzle only when it beats the fewest-clue count
   // seen so far (`best`). The main thread runs several of these in parallel
   // for a time budget and keeps the global minimum; it terminates the workers
-  // when the budget elapses. `threshold` lets an extended search ignore
-  // anything not better than the puzzle already on screen.
+  // when the budget elapses. `threshold` lets a follow-up search ignore
+  // anything not better than the puzzle already on screen (currently unused
+  // by the main thread — kept for reuse).
   self.onmessage = function(e) {
     const data = e.data || {};
     const cfg = data.config || {};
@@ -1281,7 +1372,10 @@ function workerCode() {
     const minDup = (typeof cfg.minDupLines === "number") ? cfg.minDupLines : 0;
     const minTS = (typeof cfg.minTotalSum === "number") ? cfg.minTotalSum : 0;
     const fewerPairSums = !!cfg.fewerPairSums;
+    // Tick every ~250ms (time-based, not attempt-count-based) so the UI's
+    // attempt counter updates regardless of how slow individual attempts are.
     let sinceTick = 0;
+    let nextTickAt = Date.now() + 250;
     for (;;) {
       sinceTick++;
       const numSeq = (typeof seqMode === "number") ? seqMode : 1 + ((Math.random() * 3) | 0);
@@ -1296,7 +1390,11 @@ function workerCode() {
           }
         }
       }
-      if (sinceTick >= 40) { self.postMessage({ type: "tick", attempts: sinceTick }); sinceTick = 0; }
+      if (Date.now() >= nextTickAt) {
+        self.postMessage({ type: "tick", attempts: sinceTick });
+        sinceTick = 0;
+        nextTickAt = Date.now() + 250;
+      }
     }
   };
 }
@@ -1318,10 +1416,8 @@ let activeWorkers = [];
 // === Time-budget tournament ===
 // Several workers minimise clue counts in parallel; the main thread keeps the
 // global best (fewest clues), shows it live, and runs for the full time budget
-// (or until the user clicks "Übernehmen"). The progress bar and the countdown
-// therefore match the actual search duration.
-const DEFAULT_BUDGET_MS = 6000;
-const EXTEND_MS = 10000;
+// (or until the user accepts the current best via the in-progress button).
+const DEFAULT_BUDGET_MS = 5 * 60 * 1000; // 5 minutes — hard cap; accept stops sooner
 
 let globalBest = null;   // { grid, clues, clueCount }
 let searchTimer = null;
@@ -1354,13 +1450,16 @@ function readConfig() {
 
 function updateSearchStatus() {
   const now = Date.now();
-  const span = searchDeadline - searchStart;
   const bar = el("progress-bar");
   bar.max = 1000;
+  const span = searchDeadline - searchStart;
   bar.value = span > 0 ? Math.round(Math.min(1, (now - searchStart) / span) * 1000) : 0;
   const best = globalBest ? `${globalBest.clueCount} Hinweise` : "suche …";
-  const secs = Math.max(0, Math.ceil((searchDeadline - now) / 1000));
-  el("status").textContent = `Bestes Rätsel: ${best} · ${totalAttempts} Versuche · noch ${secs}s`;
+  const secsLeft = Math.max(0, Math.ceil((searchDeadline - now) / 1000));
+  const countdown = secsLeft >= 60 ? `noch ${Math.floor(secsLeft / 60)}m ${secsLeft % 60}s` : `noch ${secsLeft}s`;
+  el("status").textContent = `Bestes Rätsel: ${best} · ${totalAttempts} Versuche · ${countdown}`;
+  // Accept is available as soon as we have any candidate to take.
+  el("accept-btn").disabled = !globalBest;
 }
 
 function onWorkerMessage(e) {
@@ -1371,6 +1470,7 @@ function onWorkerMessage(e) {
   } else if (d.type === "candidate") {
     if (!globalBest || d.clueCount < globalBest.clueCount) {
       globalBest = { grid: d.grid, clues: d.clues, clueCount: d.clueCount };
+      el("accept-btn").disabled = false;
       updateSearchStatus();
     }
   }
@@ -1379,16 +1479,13 @@ function onWorkerMessage(e) {
 function spawnWorkers() {
   const url = getWorkerUrl();
   const n = Math.max(1, Math.min(navigator.hardwareConcurrency || 2, 4));
-  const threshold = globalBest ? globalBest.clueCount : null;
   for (let i = 0; i < n; i++) {
     let w;
     try { w = new Worker(url); }
     catch (err) { console.error("Worker konnte nicht gestartet werden:", err); continue; }
     w.onmessage = onWorkerMessage;
     w.onerror = (err) => console.error("Worker error:", err);
-    const msg = { config: searchConfig };
-    if (threshold !== null) msg.threshold = threshold;
-    w.postMessage(msg);
+    w.postMessage({ config: searchConfig });
     activeWorkers.push(w);
   }
 }
@@ -1398,8 +1495,9 @@ function searchTick() {
   if (Date.now() >= searchDeadline) finishSearch();
 }
 
-function startSearch(budgetMs, fresh) {
-  if (fresh) { globalBest = null; searchConfig = readConfig(); } // extend reuses the same config
+function startSearch(budgetMs) {
+  globalBest = null;
+  searchConfig = readConfig();
   killWorkers();
   searching = true;
   totalAttempts = 0;
@@ -1408,13 +1506,12 @@ function startSearch(budgetMs, fresh) {
 
   el("generate-btn").disabled = true;
   el("print-btn").disabled = true;
-  el("extend-btn").hidden = true;
-  el("accept-btn").hidden = false;
+  el("accept-btn").disabled = true;
   el("progress").hidden = false;
   el("error").textContent = "";
   el("steps-btn").disabled = true;
   exitStepMode();
-  if (fresh) el("puzzle").hidden = true; // don't show a stale puzzle while searching
+  el("puzzle").hidden = true; // don't show a stale puzzle while searching
   updateSearchStatus();
 
   spawnWorkers();
@@ -1426,8 +1523,7 @@ function finishSearch() {
   searching = false;
   if (searchTimer) { clearInterval(searchTimer); searchTimer = null; }
   killWorkers();
-  el("progress").hidden = true;
-  el("accept-btn").hidden = true;
+  el("progress").hidden = true; // accept-btn lives inside #progress, so it hides with it
   el("generate-btn").disabled = false;
 
   if (!globalBest) {
@@ -1439,12 +1535,10 @@ function finishSearch() {
   renderPuzzle(currentPuzzle);
   el("print-btn").disabled = false;
   el("steps-btn").disabled = false;
-  el("extend-btn").hidden = false; // offer to search for an even sparser puzzle
 }
 
-function newSearch() { startSearch(DEFAULT_BUDGET_MS, true); }
+function newSearch() { startSearch(DEFAULT_BUDGET_MS); }
 function acceptNow() { if (globalBest) finishSearch(); } // ignore until first candidate
-function extendSearch() { if (!searching && globalBest) startSearch(EXTEND_MS, false); }
 
 function buildGridTable() {
   const tbl = document.getElementById("grid");
@@ -1697,6 +1791,29 @@ function solveWithTrace(clues) {
   }
   for (let r = 0; r < N; r++) for (const cl of clues.rowClues[r]) reg(cl);
   for (let c = 0; c < N; c++) for (const cl of clues.colClues[c]) reg(cl);
+  // Attach duplicate-value mask to each totalSum line for the distinct-sum rule.
+  for (const t of totals) t.dupMask = t.scope === "row" ? rowDup[t.index] : colDup[t.index];
+
+  // Lines that need feasibility-DFS (have totalSum and/or duplicate). Each
+  // also carries a post-run domain snapshot so repeat invocations on unchanged
+  // domains are skipped.
+  const lineSearches = [];
+  function lineTotalSum(scope, idx) {
+    for (const t of totals) if (t.scope === scope && t.index === idx) return t.value;
+    return -1;
+  }
+  for (let r = 0; r < N; r++) {
+    const ts = lineTotalSum("row", r), dm = rowDup[r];
+    if (ts < 0 && dm === 0) continue;
+    const cells = []; for (let c = 0; c < N; c++) cells.push(r * N + c);
+    lineSearches.push({ cells, dupMask: dm, totalSum: ts, scope: "row", index: r, snap: null });
+  }
+  for (let c = 0; c < N; c++) {
+    const ts = lineTotalSum("col", c), dm = colDup[c];
+    if (ts < 0 && dm === 0) continue;
+    const cells = []; for (let r = 0; r < N; r++) cells.push(r * N + c);
+    lineSearches.push({ cells, dupMask: dm, totalSum: ts, scope: "col", index: c, snap: null });
+  }
 
   const domains = new Array(N * N).fill(FULL);
   const steps = [];                 // each: { reason, removals:[{idx,vals}], solved:[idx] }
@@ -1780,10 +1897,10 @@ function solveWithTrace(clues) {
       if (single >= 4 && open.length) { begin(); for (const idx of open) rmBit(idx, v); commit("Die " + v + " ist bereits viermal platziert — überall sonst entfernen.", "global", { value: v }); }
     }
     if (bad) break;
-    // 4. pairSum: A + B = S
+    // 4. pairSum: A + B = S (adjacent cells, so v !== w)
     for (const p of pairs) {
       const da = domains[p.a], db = domains[p.b]; let mA = 0, mB = 0;
-      for (let v = 1; v <= 9; v++) { const w = p.value - v; if (w < 1 || w > 9) continue; if ((da & bit(v)) && (db & bit(w))) { mA |= bit(v); mB |= bit(w); } }
+      for (let v = 1; v <= 9; v++) { const w = p.value - v; if (w < 1 || w > 9 || w === v) continue; if ((da & bit(v)) && (db & bit(w))) { mA |= bit(v); mB |= bit(w); } }
       begin(); keep(p.a, mA); keep(p.b, mB);
       commit("Diese Werte haben keinen passenden Partner mehr.", "pairSum", { a: p.a, b: p.b, value: p.value });
       if (bad) break;
@@ -1802,6 +1919,62 @@ function solveWithTrace(clues) {
       commit("Mit diesen Werten ließe sich die geforderte Summe nicht mehr erreichen.", "totalSum",
         { cells: t.cells.slice(), value: t.value, scope: t.scope, index: t.index });
       if (bad) break;
+    }
+    if (bad) break;
+    // 5b. Linien-Feasibility: für jede Reihe/Spalte mit totalSum und/oder
+    // Duplikat-Hinweis alle zulässigen 6-Wert-Belegungen per DFS aufzählen
+    // (6 verschiedene Ziffern aus 1..9, der Duplikat-Wert ggf. 2× und nicht
+    // direkt benachbart; bei totalSum muss die Summe stimmen). Anschließend
+    // jede Zelle auf die Werte einschränken, die in mindestens einer
+    // Belegung vorkommen. Deckt extreme Summen (Σ=39 ⇒ {4,5,6,7,8,9}) und
+    // erzwungene Duplikat-Platzierungen (z. B. wenn nur ein nicht-benachbartes
+    // Paar von Kandidaten übrig bleibt) gemeinsam ab.
+    for (const ls of lineSearches) {
+      const cells = ls.cells;
+      if (ls.snap) {
+        let dirty = false;
+        for (let j = 0; j < 6; j++) if (domains[cells[j]] !== ls.snap[j]) { dirty = true; break; }
+        if (!dirty) continue;
+      }
+      const dupMask = ls.dupMask;
+      const target = ls.totalSum;
+      const support = [0, 0, 0, 0, 0, 0];
+      const assigned = [0, 0, 0, 0, 0, 0];
+      const usage = new Int8Array(10);
+      function search(i, sumSoFar, dupLastPos) {
+        if (i === 6) {
+          if (target >= 0 && sumSoFar !== target) return;
+          for (let v = 1; v <= 9; v++) if ((dupMask & (1 << (v - 1))) && usage[v] !== 2) return;
+          for (let j = 0; j < 6; j++) support[j] |= 1 << (assigned[j] - 1);
+          return;
+        }
+        if (target >= 0) {
+          const rem = 6 - i;
+          if (sumSoFar + rem * 9 < target) return;
+          if (sumSoFar + rem * 1 > target) return;
+        }
+        const d = domains[cells[i]];
+        for (let v = 1; v <= 9; v++) {
+          const b = 1 << (v - 1);
+          if (!(d & b)) continue;
+          const maxCount = (dupMask & b) ? 2 : 1;
+          if (usage[v] >= maxCount) continue;
+          if ((dupMask & b) && dupLastPos === i - 1) continue;
+          assigned[i] = v;
+          usage[v]++;
+          const newDupLast = (dupMask & b) ? i : dupLastPos;
+          search(i + 1, sumSoFar + v, newDupLast);
+          usage[v]--;
+        }
+      }
+      search(0, 0, -2);
+      begin();
+      for (let j = 0; j < 6 && !bad; j++) keep(cells[j], support[j]);
+      commit("Diese Werte passen in keine gültige Belegung dieser Linie.", "lineFeasibility",
+        { cells: cells.slice(), value: target, scope: ls.scope, index: ls.index });
+      if (bad) break;
+      if (!ls.snap) ls.snap = new Array(6);
+      for (let j = 0; j < 6; j++) ls.snap[j] = domains[cells[j]];
     }
     if (bad) break;
     // 6. Sequenzen
@@ -1880,6 +2053,10 @@ function clueHeadHtml(step) {
       return `<span class="chip sum"><b>${lab(cl.a)} + ${lab(cl.b)} = ${cl.value}</b></span>`;
     case "totalSum":
       return `<span class="chip sum"><b>Σ ${scopeLabel(cl)} = ${cl.value}</b></span>`;
+    case "lineFeasibility":
+      return cl.value >= 0
+        ? `<span class="chip sum"><b>Σ ${scopeLabel(cl)} = ${cl.value}</b> · zulässige Belegungen</span>`
+        : `<span class="chip dup"><b>${scopeLabel(cl)}</b> · zulässige Duplikat-Plätze</span>`;
     case "sequence": {
       const arrow = (cl.kind === "directSequence" || cl.kind === "ascending") ? "↑"
                   : (cl.kind === "directDescending" || cl.kind === "descending") ? "↓" : "→";
@@ -2137,7 +2314,6 @@ el("cfg-dup").addEventListener("input", () => {
 
 document.getElementById("generate-btn").addEventListener("click", newSearch);
 document.getElementById("accept-btn").addEventListener("click", acceptNow);
-document.getElementById("extend-btn").addEventListener("click", extendSearch);
 // Load a puzzle from a code: decode → solve → set as currentPuzzle and render.
 // Returns the grid on success, null on failure (with error message side-effect).
 function loadPuzzleFromCode(code, errPrefix) {
@@ -2152,7 +2328,6 @@ function loadPuzzleFromCode(code, errPrefix) {
   renderPuzzle(currentPuzzle);
   document.getElementById("print-btn").disabled = false;
   document.getElementById("steps-btn").disabled = false;
-  document.getElementById("extend-btn").hidden = true;
   return tr.grid;
 }
 
@@ -2344,7 +2519,6 @@ function loadManualPuzzle() {
   renderPuzzle(currentPuzzle);
   document.getElementById("print-btn").disabled = false;
   document.getElementById("steps-btn").disabled = false;
-  document.getElementById("extend-btn").hidden = true;
   document.getElementById("error").textContent = "";
   // Collapse the entry panel — the puzzle is now loaded.
   document.getElementById("manual-entry").open = false;
