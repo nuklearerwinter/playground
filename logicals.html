@@ -1028,7 +1028,14 @@ function workerCode() {
       for (let c = 0; c < N && !bad; c++) unitElim(k => k*N + c, colDup[c]);
       if (bad) break;
 
-      // Global count: each value appears exactly 4×.
+      // Global count: each value appears exactly 4×. Three sub-rules per V:
+      //   (a) basic capacity check + 4-singletons-elsewhere elimination.
+      //   (b) hidden-single global: placed + open == 4 ⇒ every open is forced V.
+      //   (c) dup-saturation: if V has 2 duplicate rows (or cols), all 4 V's
+      //       must lie in those rows (resp. cols) since each dup line commits
+      //       exactly 2 V's. Strip V from every other row (resp. col). If V has
+      //       both two dup rows AND two dup cols, V is fixed to the four
+      //       intersection cells.
       for (let v = 1; v <= 9 && !bad; v++) {
         const bit = 1 << (v - 1);
         let single = 0, possible = 0;
@@ -1038,6 +1045,21 @@ function workerCode() {
         }
         if (single > 4 || possible < 4) { bad = true; break; }
         if (single >= 4) for (const idx of open) clearBit(idx, v);
+        else if (single + open.length === 4) for (const idx of open) restrict(idx, bit);
+
+        // Collect dup rows/cols carrying V.
+        const dRows = [], dCols = [];
+        for (let r = 0; r < N; r++) if (rowDup[r] & bit) dRows.push(r);
+        for (let c = 0; c < N; c++) if (colDup[c] & bit) dCols.push(c);
+        if (dRows.length > 2 || dCols.length > 2) { bad = true; break; }
+        if (dRows.length === 2) {
+          const ok = new Set(dRows);
+          for (let r = 0; r < N; r++) if (!ok.has(r)) for (let c = 0; c < N; c++) clearBit(r*N+c, v);
+        }
+        if (dCols.length === 2) {
+          const ok = new Set(dCols);
+          for (let c = 0; c < N; c++) if (!ok.has(c)) for (let r = 0; r < N; r++) clearBit(r*N+c, v);
+        }
       }
       if (bad) break;
 
@@ -1392,7 +1414,10 @@ function workerCode() {
         const clues = pickClues(grid, { targetClues: 0, minTotalSum: minTS, maxTotalSum: maxTS, numSequences: numSeq, fewerPairSums: fewerPairSums });
         if (clues) {
           const cc = clueCountOf(clues);
-          if (cc < best) {
+          // Emit on equal-or-better clueCount so the main thread can re-rank
+          // by difficulty score (Phase 2B). Strict-less would funnel only the
+          // first puzzle of each clue count, hiding higher-difficulty ties.
+          if (cc <= best) {
             best = cc;
             self.postMessage({ type: "candidate", grid: grid, clues: clues, clueCount: cc });
           }
@@ -1427,7 +1452,39 @@ let activeWorkers = [];
 // (or until the user accepts the current best via the in-progress button).
 const DEFAULT_BUDGET_MS = 5 * 60 * 1000; // 5 minutes — hard cap; accept stops sooner
 
-let globalBest = null;   // { grid, clues, clueCount }
+// Phase 2B difficulty weighting. Approximates how much manual work a human
+// would invest to reproduce one application of the rule. Higher = harder.
+// The variety bonus rewards puzzles that exercise many distinct rule kinds.
+// The clue-count penalty offsets the natural bias of counting steps: more
+// clues mean more rule applications, but each clue also gives the human more
+// to start from. Calibrated empirically against the magazine demo (which sits
+// near the 80th percentile of generated puzzles at penalty 10).
+const RULE_WEIGHT = {
+  "adjacency": 1,
+  "distinct-row": 1, "distinct-col": 1,
+  "dup-hidden-row": 2, "dup-hidden-col": 2,
+  "global": 2,
+  "global-hidden": 2,
+  "global-dup-rows": 5, "global-dup-cols": 5,
+  "pairSum": 2,
+  "totalSum": 2,
+  "sequence": 3,
+  "lineFeasibility": 8,
+};
+const RULE_VARIETY_BONUS = 5;
+const CLUE_PENALTY = 10;
+function puzzleDifficulty(trace, clueCount) {
+  if (!trace || !trace.steps) return 0;
+  let score = 0;
+  const types = new Set();
+  for (const s of trace.steps) {
+    score += RULE_WEIGHT[s.ruleType] || 1;
+    types.add(s.ruleType);
+  }
+  return score + RULE_VARIETY_BONUS * types.size - CLUE_PENALTY * (clueCount || 0);
+}
+
+let globalBest = null;   // { grid, clues, clueCount, difficulty, trace }
 let searchTimer = null;
 let searchStart = 0, searchDeadline = 0, totalAttempts = 0;
 let searching = false;
@@ -1465,7 +1522,9 @@ function updateSearchStatus() {
   bar.max = 1000;
   const span = searchDeadline - searchStart;
   bar.value = span > 0 ? Math.round(Math.min(1, (now - searchStart) / span) * 1000) : 0;
-  const best = globalBest ? `${globalBest.clueCount} Hinweise` : "suche …";
+  const best = globalBest
+    ? `${globalBest.clueCount} Hinweise · Score ${globalBest.difficulty}`
+    : "suche …";
   const secsLeft = Math.max(0, Math.ceil((searchDeadline - now) / 1000));
   const countdown = secsLeft >= 60 ? `noch ${Math.floor(secsLeft / 60)}m ${secsLeft % 60}s` : `noch ${secsLeft}s`;
   el("status").textContent = `Bestes Rätsel: ${best} · ${totalAttempts} Versuche · ${countdown}`;
@@ -1479,8 +1538,17 @@ function onWorkerMessage(e) {
   if (d.type === "tick") {
     totalAttempts += d.attempts;
   } else if (d.type === "candidate") {
-    if (!globalBest || d.clueCount < globalBest.clueCount) {
-      globalBest = { grid: d.grid, clues: d.clues, clueCount: d.clueCount };
+    // Score the candidate. Workers still post on monotone clueCount drops, so
+    // ranking is over a fewest-clues-first sample — good enough as long as the
+    // tournament gets several improvements per search.
+    const trace = solveWithTrace(d.clues);
+    if (!trace.solved) return; // safety net; should not happen if worker accepted.
+    const difficulty = puzzleDifficulty(trace, d.clueCount);
+    const isBetter = !globalBest
+      || difficulty > globalBest.difficulty
+      || (difficulty === globalBest.difficulty && d.clueCount < globalBest.clueCount);
+    if (isBetter) {
+      globalBest = { grid: d.grid, clues: d.clues, clueCount: d.clueCount, difficulty, trace };
       el("accept-btn").disabled = false;
       updateSearchStatus();
     }
@@ -1542,7 +1610,7 @@ function finishSearch() {
     return;
   }
   const code = encodePuzzle(globalBest.clues);
-  currentPuzzle = { grid: globalBest.grid, clues: globalBest.clues, code, clueCount: globalBest.clueCount };
+  currentPuzzle = { grid: globalBest.grid, clues: globalBest.clues, code, clueCount: globalBest.clueCount, trace: globalBest.trace };
   renderPuzzle(currentPuzzle);
   el("print-btn").disabled = false;
   el("steps-btn").disabled = false;
@@ -1900,12 +1968,44 @@ function solveWithTrace(clues) {
     if (bad) break;
     for (let c = 0; c < N && !bad; c++) unit(k => k * N + c, colDup[c], colLabel(c), "col");
     if (bad) break;
-    // 3. Globale Zählung: jede Zahl genau 4×
+    // 3. Globale Zählung: jede Zahl genau 4×, plus zwei Verschärfungen pro Wert:
+    //    – Hidden-Single global: wenn Singletons + offene Kandidaten = 4, sind
+    //      alle offenen Kandidaten erzwungen.
+    //    – Dup-Sättigung: hat ein Wert zwei Duplikat-Reihen (oder -Spalten),
+    //      sind alle 4 Vorkommen in diesen Reihen (bzw. Spalten), weil jede
+    //      Duplikat-Linie genau 2 Vorkommen bindet. ⇒ Wert aus allen anderen
+    //      Reihen (bzw. Spalten) entfernen.
     for (let v = 1; v <= 9 && !bad; v++) {
       const b = bit(v); let single = 0; const open = [];
       for (let i = 0; i < N * N; i++) if (domains[i] & b) { if (isSingle(i)) single++; else open.push(i); }
       if (single > 4 || single + open.length < 4) { bad = true; break; }
       if (single >= 4 && open.length) { begin(); for (const idx of open) rmBit(idx, v); commit("Die " + v + " ist bereits viermal platziert — überall sonst entfernen.", "global", { value: v }); }
+      else if (single + open.length === 4 && open.length) {
+        begin(); for (const idx of open) keep(idx, b);
+        commit("Die " + v + " hat global nur noch genau vier Plätze — alle übrigen erzwungen.", "global-hidden", { value: v });
+      }
+      if (bad) break;
+      // Dup-Sättigung
+      const dRows = [], dCols = [];
+      for (let r = 0; r < N; r++) if (rowDup[r] & b) dRows.push(r);
+      for (let c = 0; c < N; c++) if (colDup[c] & b) dCols.push(c);
+      if (dRows.length > 2 || dCols.length > 2) { bad = true; break; }
+      if (dRows.length === 2) {
+        const ok = new Set(dRows);
+        begin();
+        for (let r = 0; r < N; r++) if (!ok.has(r)) for (let c = 0; c < N; c++) rmBit(r * N + c, v);
+        commit("Die " + v + " hat zwei Duplikat-Reihen — alle vier Vorkommen liegen dort, anderswo entfernen.", "global-dup-rows",
+          { value: v, rows: dRows.slice() });
+        if (bad) break;
+      }
+      if (dCols.length === 2) {
+        const ok = new Set(dCols);
+        begin();
+        for (let c = 0; c < N; c++) if (!ok.has(c)) for (let r = 0; r < N; r++) rmBit(r * N + c, v);
+        commit("Die " + v + " hat zwei Duplikat-Spalten — alle vier Vorkommen liegen dort, anderswo entfernen.", "global-dup-cols",
+          { value: v, cols: dCols.slice() });
+        if (bad) break;
+      }
     }
     if (bad) break;
     // 4. pairSum: A + B = S (adjacent cells, so v !== w)
@@ -2060,6 +2160,12 @@ function clueHeadHtml(step) {
       return `<span class="chip dist"><b>${cl.value}</b> fest in ${cl.fixedAt.map(lab).join(", ")} · ${cl.label}</span>`;
     case "global":
       return `<span class="chip glob"><b>${cl.value}</b> ist 4× voll</span>`;
+    case "global-hidden":
+      return `<span class="chip glob"><b>${cl.value}</b> · noch genau 4 globale Plätze</span>`;
+    case "global-dup-rows":
+      return `<span class="chip glob"><b>${cl.value}</b> · zwei Duplikat-Reihen (${cl.rows.map(r => ROW_LABELS[r]).join(", ")})</span>`;
+    case "global-dup-cols":
+      return `<span class="chip glob"><b>${cl.value}</b> · zwei Duplikat-Spalten (${cl.cols.map(c => COL_LABELS[c]).join(", ")})</span>`;
     case "pairSum":
       return `<span class="chip sum"><b>${lab(cl.a)} + ${lab(cl.b)} = ${cl.value}</b></span>`;
     case "totalSum":
