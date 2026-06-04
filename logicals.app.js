@@ -435,10 +435,18 @@ function clueHeadHtml(step) {
       return `<span class="chip sum"><b>${lab(cl.a)} + ${lab(cl.b)} = ${cl.value}</b></span>`;
     case "totalSum":
       return `<span class="chip sum"><b>Σ ${scopeLabel(cl)} = ${cl.value}</b></span>`;
-    case "lineFeasibility":
-      return cl.value >= 0
-        ? `<span class="chip sum"><b>Σ ${scopeLabel(cl)} = ${cl.value}</b> · zulässige Belegungen</span>`
-        : `<span class="chip dup"><b>${scopeLabel(cl)}</b> · zulässige Duplikat-Plätze</span>`;
+    case "lineFeasibility": {
+      // This rule fuses EVERY constraint on the line — name all that are active
+      // (totalSum and/or the duplicate value), not just one, so the head isn't
+      // misleading. (The candidate state it works on also reflects earlier
+      // deductions from crossing clues; those aren't repeated here.)
+      let dv = 0; if (cl.dupMask) for (let v = 1; v <= 9; v++) if (cl.dupMask & (1 << (v - 1))) dv = v;
+      const parts = [];
+      if (cl.value >= 0) parts.push(`Σ ${scopeLabel(cl)} = ${cl.value}`);
+      if (dv) parts.push(cl.value >= 0 ? `${dv} doppelt` : `${scopeLabel(cl)} · ${dv} doppelt`);
+      if (!parts.length) parts.push(scopeLabel(cl));
+      return `<span class="chip ${cl.value >= 0 ? "sum" : "dup"}"><b>${parts.join(" · ")}</b> · zulässige Belegungen</span>`;
+    }
     case "sequence": {
       const arrow = (cl.kind === "directSequence" || cl.kind === "ascending") ? "↑"
                   : (cl.kind === "directDescending" || cl.kind === "descending") ? "↓" : "→";
@@ -474,6 +482,16 @@ function combosHtmlForStep(step, dom) {
     if (items.length <= 4) return `<span class="lbl">Noch möglich:</span> ${items.map(fmt).join(", ")}`;
     return `<span class="lbl">Noch ${items.length} ${kind} möglich.</span>`;
   }
+  // For an elimination step (totalSum/lineFeasibility), spell out the bridge the
+  // raw enumeration leaves implicit: the struck values appear in NONE of those
+  // possibilities at the marked cells — which is exactly why they're removed.
+  function whyStruck(kind) {
+    const s = new Set();
+    for (const rm of (step.removals || [])) for (const v of rm.vals) s.add(v);
+    if (!s.size) return "";
+    const list = [...s].sort((a, b) => a - b).join(", ");
+    return ` <span class="lbl">Die gestrichenen Werte (${list}) kommen in keiner dieser ${kind} an den markierten Zellen vor – deshalb werden sie entfernt.</span>`;
+  }
   if (step.ruleType === "pairSum") {
     const da = dom[cl.a], db = dom[cl.b]; const combos = [];
     for (let v=1;v<=9;v++) { const w = cl.value-v; if (w<1||w>9) continue; if ((da&(1<<(v-1)))&&(db&(1<<(w-1)))) combos.push([v,w]); }
@@ -493,8 +511,9 @@ function combosHtmlForStep(step, dom) {
       }
     }
     rec(0, 0, []);
-    if (out.length >= cap) return `<span class="lbl">Noch viele Kombinationen möglich (≥ ${cap}).</span>`;
-    return listOrCount(out, t => `<b>${fmtTuple(t, "+")}</b>`, "Summenkombinationen");
+    const tail = whyStruck("Summenkombinationen");
+    if (out.length >= cap) return `<span class="lbl">Es gibt noch über ${cap} mögliche Summenkombinationen.</span>` + tail;
+    return listOrCount(out, t => `<b>${fmtTuple(t, "+")}</b>`, "Summenkombinationen") + tail;
   }
   if (step.ruleType === "lineFeasibility") {
     // Enumerate up to `cap` complete feasible 6-tuples for this line:
@@ -538,8 +557,9 @@ function combosHtmlForStep(step, dom) {
     }
     rec(0, 0, -2);
     const kind = target >= 0 ? "Summenkombinationen" : "Belegungen";
-    if (out.length >= cap) return `<span class="lbl">Noch viele ${kind} möglich (≥ ${cap}).</span>`;
-    return listOrCount(out, t => `<b>${fmtTuple(t, "+")}</b>`, kind);
+    const tail = whyStruck(kind);
+    if (out.length >= cap) return `<span class="lbl">Es gibt noch über ${cap} mögliche ${kind}.</span>` + tail;
+    return listOrCount(out, t => `<b>${fmtTuple(t, "+")}</b>`, kind) + tail;
   }
   if (step.ruleType === "sequence") {
     const doms = cl.cells.map(idx => dom[idx]);
