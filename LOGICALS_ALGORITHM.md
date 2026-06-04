@@ -189,8 +189,18 @@ Funktion: `solveWithTrace(clues)` (Hauptthread). Eigenständige, **tracende
 Variante von `logicalSolve`** — gleiche Regeln, aber jede **Regelanwendung, die
 Kandidaten entfernt, ergibt einen Schritt**: `{ reason, removals:[{idx,vals}],
 solved:[idx] }`. Sie löst **allein aus den Clues** (liest nie
-`currentPuzzle.grid`) und liefert `{ solved, steps, grid }`. Typisch ~100–120
+`currentPuzzle.grid`) und liefert `{ solved, steps, grid }`. Typisch ~100
 Schritte pro Rätsel.
+
+**Schritt-Reihenfolge imitiert den Menschen** (anders als die Phasen-Reihenfolge
+von `logicalSolve`): Eine `cascade()`-Worklist arbeitet die
+offensichtlichen Folgen jeder frisch gesetzten Zelle sofort ab — erst Adjazenz,
+dann Reihen-/Spalten-Distinktheit — und zwar vollständig, *vor* und *nach* jeder
+schwereren Batch-Regel. Eine **lückenlose Sequenz** wird ab einer einzigen
+bekannten Zelle in **einem gebündelten `"sequence"`-Schritt** komplett gefüllt
+(`fillDirectSequence`). Das ist zulässig, weil die Propagation konfluent/monoton
+ist (gleicher Fixpunkt, egal in welcher Reihenfolge) — `logicalSolve` (das
+Akzeptanz-Gate) bleibt unverändert.
 
 Die Darstellung ist **Sudoku-artig mit Pencil-Marks**: jede Zelle zeigt ihre
 noch möglichen Ziffern (3×3-Raster); pro Schritt werden die durch die Regel
@@ -205,12 +215,14 @@ eingeschränkte Kandidaten sieht.
 `exitStepMode`): Vor/Zurück/Zurücksetzen + Abspielen (~400 ms/Schritt) und eine
 mitlaufende, klickbare Schrittliste mit Begründung + entfernten Werten.
 
-**Wichtig:** `solveWithTrace` muss die Regeln von `logicalSolve` spiegeln — bei
-Solver-Änderungen beide anpassen. Sicherheitsnetz: stimmt `grid` nicht mit der
+**Wichtig:** `solveWithTrace` muss die *Regelmenge* von `logicalSolve` spiegeln
+— bei Solver-Änderungen beide anpassen (eine neue Regel auch bewusst in die
+Kaskade/Schleife einsortieren). Sicherheitsnetz: stimmt `grid` nicht mit der
 bekannten Lösung überein (Drift/Bug), wird der Schritt-Modus übersprungen und
 die Lösung direkt eingeblendet. Validierung headless via Node-Kopie der
 Funktion (Brace-Matching extrahieren): gelöst, zurückgespielte `removals` ==
-Lösung, kein Entfernen abwesender Werte, keine geleerte Domain.
+Lösung, kein Entfernen abwesender Werte, kein Entfernen des *Lösungswerts*, keine
+geleerte Domain, und lückenlose Sequenzen werden gebündelt gefüllt.
 
 ## Suchstrategie & Schwierigkeit (Zeit-Turnier)
 

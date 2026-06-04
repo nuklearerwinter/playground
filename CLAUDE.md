@@ -111,11 +111,21 @@ Architectural points that are non-obvious from the code:
   candidate pencil-marks** per cell (`td.pencil .cands`); `renderStep` replays
   `removals` onto full domains to get the candidate state at any step, struck-
   out for the current step, and a running clickable step list with reasons.
-  **`solveWithTrace` must mirror `logicalSolve`'s rules** — change both
+  **`solveWithTrace` must mirror `logicalSolve`'s set of rules** — change both
   together; a safety net falls back to a plain reveal if its grid ≠ the known
-  solution. Validate with a Node copy (extract by brace-matching;
-  `/tmp/lt/trace.js`: assert solved, replayed removals == solution, no removal
-  of an absent value, no emptied domain).
+  solution. **Step ORDER intentionally differs from `logicalSolve`'s phase
+  order**, to read like a person solving: a `cascade()` worklist drains the
+  human-obvious consequences of every freshly placed cell (adjacency, then
+  row/column distinct) to exhaustion before — and again after — each heavier
+  batched rule, and a **gapless (direct) sequence is filled in ONE bundled
+  `"sequence"` step** from a single placed anchor (`fillDirectSequence`). This
+  is sound because the propagation is confluent/monotone (same fixpoint
+  regardless of order), so `logicalSolve` (the acceptance gate) is left
+  untouched. A new rule must be added to BOTH and slotted into the cascade/loop
+  consciously. Validate with a Node copy (extract by brace-matching;
+  `/tmp/lt/trace.js`: assert solved, replayed `removals` == solution, no removal
+  of an absent value, no removal of the SOLUTION value, no emptied domain, and
+  that direct-sequence puzzles get a bundled fill).
 - **Manual puzzle entry (`parseManualLine` / `loadManualPuzzle`).** A
   collapsible `<details>` panel with 12 inputs (rows A–F + cols 1–6) lets
   users transcribe magazine puzzles. Syntax per field (case-insensitive,

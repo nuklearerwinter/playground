@@ -1172,27 +1172,88 @@ function solveWithTrace(clues) {
     }
   }
 
+  // Human-style cascade: when a cell is finalised, a person immediately strikes
+  // that value from its neighbours and the rest of its row/column, and — for a
+  // GAPLESS (direct) sequence — fills the whole run in one go. We model that as
+  // a worklist drained to exhaustion, before and after every batched rule that
+  // can place a cell, so the trace reads in the order a person would work.
+  // Soundness and the fixpoint are unchanged (confluent monotone propagation);
+  // only the order in which steps are emitted differs.
+  const directSeqByCell = new Map();
+  for (const s of seqs) if (s.type === "directSequence" || s.type === "directDescending") {
+    s.cells.forEach((idx, pos) => {
+      if (!directSeqByCell.has(idx)) directSeqByCell.set(idx, []);
+      directSeqByCell.get(idx).push({ seq: s, pos });
+    });
+  }
+  const cascaded = new Uint8Array(N * N);
+  const queue = [];
+  function enqueueSingles() {
+    for (let i = 0; i < N * N; i++) if (!cascaded[i] && isSingle(i) && queue.indexOf(i) < 0) queue.push(i);
+  }
+  // Distinct strike for one value (dup-aware): mirrors unit's distinct branch.
+  function strikeLine(getIdx, dupMask, v, scope, label) {
+    const b = bit(v), maxC = (dupMask & b) ? 2 : 1;
+    let single = 0; const open = [], fixedAt = [];
+    for (let k = 0; k < N; k++) { const idx = getIdx(k); if (domains[idx] & b) { if (isSingle(idx)) { single++; fixedAt.push(idx); } else open.push(idx); } }
+    if (single > maxC) { bad = true; return; }
+    if (single >= maxC && open.length) {
+      begin(); for (const idx of open) rmBit(idx, v);
+      commit("Jede Zahl höchstens einmal pro " + (scope === "row" ? "Reihe" : "Spalte") + ".", scope === "row" ? "distinct-row" : "distinct-col",
+        { value: v, fixedAt: fixedAt.slice(), label, scope });
+    }
+  }
+  // Gapless sequence: one known cell fixes every other cell — emit as ONE step.
+  function fillDirectSequence(seq, pos) {
+    const anchor = seq.cells[pos], anchorVal = valOf(anchor), dir = seq.type === "directSequence" ? 1 : -1;
+    begin();
+    for (let k = 0; k < seq.cells.length && !bad; k++) {
+      const v = anchorVal + dir * (k - pos);
+      if (v < 1 || v > 9) { bad = true; break; }
+      keep(seq.cells[k], bit(v));
+    }
+    commit("Lückenlose Sequenz: ab " + cl2(anchor) + "=" + anchorVal + " liegt die ganze Linie fest.", "sequence",
+      { cells: seq.cells.slice(), kind: seq.type, scope: seq.scope, index: seq.index });
+  }
+  function cascade() {
+    enqueueSingles();
+    while (queue.length && !bad) {
+      const idx = queue.shift();
+      if (cascaded[idx] || !isSingle(idx)) continue;
+      cascaded[idx] = 1;
+      const v = valOf(idx), r = (idx / N) | 0, c = idx % N;
+      // Adjacency: forbid v in the four orthogonal neighbours.
+      begin();
+      if (r > 0) rmBit(idx - N, v);
+      if (r < N - 1) rmBit(idx + N, v);
+      if (c > 0) rmBit(idx - 1, v);
+      if (c < N - 1) rmBit(idx + 1, v);
+      commit("Gleiche Zahlen dürfen nicht direkt nebeneinander stehen.", "adjacency", { srcIdx: idx, value: v });
+      enqueueSingles();
+      // Distinct: strike v from the rest of the row, then the column.
+      strikeLine(k => r * N + k, rowDup[r], v, "row", rowLabel(r)); enqueueSingles();
+      strikeLine(k => k * N + c, colDup[c], v, "col", colLabel(c)); enqueueSingles();
+      // Gapless sequence: fill the whole run from this anchor.
+      if (directSeqByCell.has(idx)) for (const e of directSeqByCell.get(idx)) { fillDirectSequence(e.seq, e.pos); enqueueSingles(); if (bad) break; }
+    }
+  }
+
   // Propagation bis zum Fixpunkt. Jede Regelanwendung, die mindestens einen
   // Kandidaten entfernt, ergibt EINEN Schritt (mit Begründung + entfernten Werten).
   let guard = 0;
   while (!bad && guard++ < 400) {
     const before = steps.length;
-    // 1. Adjazenz
-    for (let r = 0; r < N && !bad; r++) for (let c = 0; c < N; c++) {
-      const idx = r * N + c; if (!isSingle(idx)) continue; const v = valOf(idx);
-      begin();
-      if (r > 0) rmBit((r - 1) * N + c, v);
-      if (r < N - 1) rmBit((r + 1) * N + c, v);
-      if (c > 0) rmBit(r * N + c - 1, v);
-      if (c < N - 1) rmBit(r * N + c + 1, v);
-      commit("Gleiche Zahlen dürfen nicht direkt nebeneinander stehen.", "adjacency", { srcIdx: idx, value: v });
-    }
-    if (bad) break;
-    // 2. Distinktheit / Dup-Hidden je Reihe, dann Spalte
+    // 1. Kaskade: erst die menschlich-offensichtlichen Folgen jeder frisch
+    //    gesetzten Zelle (Adjazenz + Reihe/Spalte-Distinktheit + Sequenzfüllung).
+    cascade(); if (bad) break;
+    // 2. Distinktheit / Dup-Hidden je Reihe, dann Spalte. (Die Distinktheit
+    //    erledigt meist schon die Kaskade; unit liefert zusätzlich Dup-Hidden.)
     for (let r = 0; r < N && !bad; r++) unit(k => r * N + k, rowDup[r], rowLabel(r), "row");
     if (bad) break;
+    cascade(); if (bad) break;
     for (let c = 0; c < N && !bad; c++) unit(k => k * N + c, colDup[c], colLabel(c), "col");
     if (bad) break;
+    cascade(); if (bad) break;
     // 3. Globale Zählung: jede Zahl genau 4×, plus zwei Verschärfungen pro Wert:
     //    – Hidden-Single global: wenn Singletons + offene Kandidaten = 4, sind
     //      alle offenen Kandidaten erzwungen.
@@ -1233,6 +1294,7 @@ function solveWithTrace(clues) {
       }
     }
     if (bad) break;
+    cascade(); if (bad) break;
     // 4. pairSum: A + B = S (adjacent cells, so v !== w)
     for (const p of pairs) {
       const da = domains[p.a], db = domains[p.b]; let mA = 0, mB = 0;
@@ -1242,6 +1304,7 @@ function solveWithTrace(clues) {
       if (bad) break;
     }
     if (bad) break;
+    cascade(); if (bad) break;
     // 5. totalSum: Summe einer Reihe/Spalte
     for (const t of totals) {
       const cells = t.cells; begin();
@@ -1313,6 +1376,7 @@ function solveWithTrace(clues) {
       for (let j = 0; j < 6; j++) ls.snap[j] = domains[cells[j]];
     }
     if (bad) break;
+    cascade(); if (bad) break;
     // 6. Sequenzen
     for (const s of seqs) {
       const cells = s.cells;
@@ -1331,6 +1395,7 @@ function solveWithTrace(clues) {
       if (bad) break;
     }
     if (bad) break;
+    cascade(); if (bad) break;
     if (steps.length === before) break; // Fixpunkt erreicht
   }
 
