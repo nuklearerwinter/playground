@@ -8,6 +8,14 @@ Pure static HTML — no build system, no package manager, no tests. Each `*.html
 file is a self-contained application: open it in a browser, done. They share
 no code or assets. If you touch one, you don't risk the others.
 
+The one exception is `logicals.html`, which (given its size) loads three local
+scripts in order — `qrcode.min.js` (vendored QR lib), `logicals.solver.js`
+(pure puzzle logic, DOM-free, Node-testable), and `logicals.app.js`
+(DOM/worker-orchestration/UI). They are **classic** scripts (not ES modules) so
+the "just open the file over `file://`" smoke test keeps working. Load order
+matters: `logicals.app.js` builds `WORKER_SRC` from `workerCode.toString()` at
+load time, so `logicals.solver.js` must load first.
+
 ## Logicals generator (`logicals.html`)
 
 This is the only non-trivial file. Before editing it, read
@@ -18,12 +26,12 @@ selection, and the three difficulty presets.
 Architectural points that are non-obvious from the code:
 
 - **Worker code is shipped as a function source string.** The function
-  `workerCode()` in the main (second) `<script>` is never called directly;
-  it's `.toString()`'d, wrapped in `(...)()`, blob-URL'd, and loaded into a
-  `Worker`. That means **anything inside `workerCode` cannot reference
-  outer-scope variables** — it lives in a different JavaScript realm at
-  runtime. Constants (`N`, helpers) are duplicated on purpose. (The first
-  `<script>` is a vendored minified QR-code library used by the main thread.)
+  `workerCode()` in `logicals.solver.js` is never called directly; it's
+  `.toString()`'d (in `logicals.app.js`), wrapped in `(...)()`, blob-URL'd, and
+  loaded into a `Worker`. That means **anything inside `workerCode` cannot
+  reference outer-scope variables** — it lives in a different JavaScript realm
+  at runtime. Constants (`N`, helpers) are duplicated on purpose. (The QR-code
+  library lives in `qrcode.min.js`.)
 - **Acceptance = deducible, not just unique.** A unique solution can still
   require guessing; that produces puzzles a human can't finish ("used every
   clue, still stuck"). The gate is `logicalSolve` — a propagation-only solver
@@ -134,18 +142,26 @@ Architectural points that are non-obvious from the code:
 
 - **Smoke test**: open the file directly (`xdg-open logicals.html` or
   double-click). No server needed.
-- **No automated tests in-repo, but the worker logic is testable in Node.**
-  Extract the `workerCode()` body (regex from `function workerCode() {` to the
-  `// === Main-thread` marker), wrap it in `new Function("self", body + "; return {
-  generateGrid, pickClues, logicalSolve, buildCandidateClues };")`, and you can
-  batch-generate puzzles headlessly (mirror the worker: random `numSequences`
-  1–3, `pickClues(grid, {targetClues:0})`). The critical assertions when
-  changing the generator/solver: for every emitted puzzle (a)
-  `logicalSolve(clues).solved` is true and (b) its returned grid **equals** the
-  real grid (this checks soundness, and soundness ⇒ uniqueness). Also confirm
-  yield stays high and every puzzle keeps a sequence. In the browser, also
-  check hints render, print fits one A4 page (incl. the clue count), and the
-  code round-trips. (Node is installed in this environment.)
+- **No automated tests in-repo, but the logic is testable in Node** — and the
+  file split makes it easy. `logicals.solver.js` is DOM-free, so `vm`-eval the
+  whole file and grab its top-level symbols (append
+  `;Object.assign(this,{workerCode,solveWithTrace,encodePuzzle,decodePuzzle,puzzleDifficulty,countClues,N})`).
+  For the worker internals, extract the `workerCode()` body from the loaded
+  function (`workerCode.toString()`, strip the outer `function(){…}`) and wrap
+  it in `new Function("self", body + "; return { generateGrid, pickClues,
+  logicalSolve, buildCandidateClues };")({})`. Then batch-generate (mirror the
+  worker: random `numSequences` 1–3, `pickClues(grid, {targetClues:0})`).
+  **Gotcha:** `pickClues` returns the *structured* clue set
+  `{rowClues, colClues}` (lists per line) — not a flat array — and
+  `logicalSolve` / `solveWithTrace` / `encodePuzzle` / `countClues` all consume
+  that shape directly. The critical assertions when changing the
+  generator/solver: for every emitted puzzle (a) `logicalSolve(clues).solved`
+  is true and (b) its returned grid **equals** the real grid (this checks
+  soundness, and soundness ⇒ uniqueness); plus (c) `solveWithTrace(clues).grid`
+  equals it too (the trace mirror). Also confirm yield stays high and every
+  puzzle keeps a sequence. A ready harness lives at `/tmp/lt/test.js`. In the
+  browser, also check hints render, print fits one A4 page (incl. the clue
+  count), and the code round-trips. (Node is installed in this environment.)
 - **Performance baseline**: one minimise attempt runs in ~6 ms; the tournament
   reaches ~11–12 clues in a few seconds with 4 workers. If a single attempt
   takes much longer or yield collapses, something regressed (e.g. a

@@ -30,7 +30,16 @@ Hinweistypen, die der Generator erzeugt:
 
 ## Architektur
 
-Die Erzeugung läuft in **Web Workers** (`workerCode()` im Quelltext, per
+Der Code ist auf drei lokale Skripte aufgeteilt, die `logicals.html` in dieser
+Reihenfolge lädt (klassische Skripte, keine ES-Module — damit der
+`file://`-Smoke-Test funktioniert): `qrcode.min.js` (vendorte QR-Bibliothek),
+`logicals.solver.js` (reine Rätsellogik, DOM-frei: Konstanten, Rätselcode-
+Encoding, `workerCode`, Difficulty-Scoring, `solveWithTrace`) und
+`logicals.app.js` (DOM, Worker-Orchestrierung, UI). Ladereihenfolge ist
+bindend: `logicals.app.js` baut `WORKER_SRC` zur Ladezeit aus
+`workerCode.toString()`, also muss `logicals.solver.js` vorher geladen sein.
+
+Die Erzeugung läuft in **Web Workers** (`workerCode()`, per
 `Blob` + `URL.createObjectURL` als Worker-Skript geladen). Bis zu 4 Worker
 laufen parallel als **Zeit-Turnier**: jeder erzeugt und minimiert
 fortlaufend Rätsel und meldet immer dann eines, wenn es weniger Hinweise hat
