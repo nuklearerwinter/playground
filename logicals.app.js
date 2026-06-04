@@ -459,6 +459,8 @@ function clueHeadHtml(step) {
     case "dup-hidden-row":
     case "dup-hidden-col":
       return `<span class="chip dup">doppelte <b>${cl.value}</b> in ${cl.label}</span>`;
+    case "dup-place":
+      return `<span class="chip dup"><b>${cl.value} doppelt in ${scopeLabel(cl)}</b> · Platzierung</span>`;
     default: return `<span class="chip">${step.ruleType || ""}</span>`;
   }
 }

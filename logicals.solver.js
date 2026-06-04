@@ -607,6 +607,31 @@ function workerCode() {
       }
     }
 
+    // Duplicate placement (adjacency-aware): the doubled value fits only in the
+    // cells that still list it, and two of them must sit at NON-adjacent line
+    // positions. So a cell that lies in every valid non-adjacent pair is forced
+    // to the value, and a cell with no non-adjacent partner can't hold it. This
+    // is the cheap human shortcut the full feasibility DFS would otherwise find
+    // by brute force (e.g. 5×2 fits B5/C5/F5, B5–C5 adjacent ⇒ F5 = 5).
+    function nonAdjPair(arr) {
+      for (let i = 0; i < arr.length; i++) for (let j = i + 1; j < arr.length; j++) if (arr[j] - arr[i] >= 2) return true;
+      return false;
+    }
+    function dupPlacement(cells, dupMask) {
+      for (let v = 1; v <= 9 && !bad; v++) {
+        const b = 1 << (v - 1);
+        if (!(dupMask & b)) continue;
+        const hosts = [];
+        for (let p = 0; p < 6; p++) if (domains[cells[p]] & b) hosts.push(p);
+        if (!nonAdjPair(hosts)) { bad = true; return; }
+        for (const p of hosts) {
+          const hasPartner = hosts.some(q => q !== p && Math.abs(q - p) >= 2);
+          if (!hasPartner) { clearBit(cells[p], v); continue; }
+          if (!nonAdjPair(hosts.filter(q => q !== p))) restrict(cells[p], b);
+        }
+      }
+    }
+
     let guard = 0;
     while (progress && !bad && guard++ < 200) {
       progress = false;
@@ -698,6 +723,10 @@ function workerCode() {
         }
         if (bad) break;
       }
+      if (bad) break;
+
+      // Duplicate placement (adjacency-aware) — cheap; runs before the DFS.
+      for (const ls of lineSearches) { if (ls.dupMask) dupPlacement(ls.cells, ls.dupMask); if (bad) break; }
       if (bad) break;
 
       // Line feasibility: for any row/column constrained by a totalSum or
@@ -1047,6 +1076,7 @@ const RULE_WEIGHT = {
   "global": 2,
   "global-hidden": 2,
   "global-dup-rows": 5, "global-dup-cols": 5,
+  "dup-place": 2,
   "pairSum": 2,
   "totalSum": 2,
   "sequence": 3,
@@ -1320,6 +1350,43 @@ function solveWithTrace(clues) {
       if (bad) break;
     }
     if (bad) break;
+    cascade(); if (bad) break;
+    // 5a. Duplikat-Platzierung (nachbarschaftsbewusst): die doppelte Zahl passt
+    //     nur in die Zellen, die sie noch führen, und zwei davon müssen NICHT
+    //     benachbart liegen. Eine Zelle, die in jedem zulässigen nicht-benachbarten
+    //     Paar steckt, ist erzwungen; eine ohne nicht-benachbarten Partner scheidet
+    //     aus. Das ist die billige menschliche Abkürzung, die die Feasibility-DFS
+    //     sonst per Brute Force fände (5×2 passt B5/C5/F5, B5–C5 benachbart ⇒ F5=5).
+    {
+      const nonAdjPair = arr => { for (let i = 0; i < arr.length; i++) for (let j = i + 1; j < arr.length; j++) if (arr[j] - arr[i] >= 2) return true; return false; };
+      for (const ls of lineSearches) {
+        if (!ls.dupMask) continue;
+        const cells = ls.cells, lineLabel = ls.scope === "row" ? rowLabel(ls.index) : colLabel(ls.index);
+        for (let v = 1; v <= 9 && !bad; v++) {
+          if (!(ls.dupMask & bit(v))) continue;
+          const hosts = []; for (let p = 0; p < 6; p++) if (domains[cells[p]] & bit(v)) hosts.push(p);
+          if (!nonAdjPair(hosts)) { bad = true; break; }
+          const forced = [], stripped = [];
+          for (const p of hosts) {
+            if (!hosts.some(q => q !== p && Math.abs(q - p) >= 2)) { stripped.push(p); continue; }
+            if (!nonAdjPair(hosts.filter(q => q !== p))) forced.push(p);
+          }
+          const hostLabels = hosts.map(p => cl2(cells[p])).join(", ");
+          const clue = { value: v, cells: cells.slice(), hosts: hosts.slice(), scope: ls.scope, index: ls.index };
+          if (forced.length) {
+            begin(); for (const p of forced) keep(cells[p], bit(v));
+            commit("Die " + v + " kommt in " + lineLabel + " doppelt vor und passt nur in " + hostLabels + ". Weil zwei benachbarte Zellen nicht beide die " + v + " sein können, ist " + forced.map(p => cl2(cells[p])).join(", ") + " = " + v + " erzwungen.", "dup-place", clue);
+          }
+          if (stripped.length && !bad) {
+            begin(); for (const p of stripped) rmBit(cells[p], v);
+            commit("Die " + v + " kommt in " + lineLabel + " doppelt vor; in " + stripped.map(p => cl2(cells[p])).join(", ") + " hätte sie keinen nicht-benachbarten Partner — hier ausgeschlossen.", "dup-place", clue);
+          }
+        }
+        if (bad) break;
+      }
+    }
+    if (bad) break;
+    cascade(); if (bad) break;
     // 5b. Linien-Feasibility: für jede Reihe/Spalte mit totalSum und/oder
     // Duplikat-Hinweis alle zulässigen 6-Wert-Belegungen per DFS aufzählen
     // (6 verschiedene Ziffern aus 1..9, der Duplikat-Wert ggf. 2× und nicht

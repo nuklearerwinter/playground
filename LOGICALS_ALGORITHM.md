@@ -118,6 +118,17 @@ Pro Durchlauf werden angewandt:
   nur Werte, zu denen der Partner einen passenden Komplementärwert hat.
 - **totalSum-Schrankenpropagation**: Pro Linie mit bekannter Gesamtsumme
   werden Zellwerte über Min/Max-Summen der übrigen Zellen eingegrenzt.
+- **Duplikat-Platzierung (nachbarschaftsbewusst, `dupPlacement`)**: Die doppelte
+  Zahl passt nur in die Zellen, die sie noch führen; zwei davon müssen *nicht*
+  benachbart liegen. Eine Zelle, die in jedem zulässigen nicht-benachbarten Paar
+  steckt, wird erzwungen; eine ohne nicht-benachbarten Partner verliert den Wert.
+  Läuft **vor** der Feasibility-DFS und ist die billige menschliche Abkürzung,
+  die die DFS sonst per Brute Force fände (5×2 passt B5/C5/F5, B5–C5 benachbart
+  ⇒ F5=5). Senkt damit auch den gemessenen Aufwand `B` (siehe Schwierigkeit).
+- **Linien-Feasibility-DFS**: Für jede Linie mit Summe und/oder Duplikat zählt
+  eine DFS alle gültigen 6-Wert-Belegungen auf; Werte ohne Vorkommen werden
+  gestrichen. Fängt extreme Summen + komplexere Duplikat-Fälle ab, die
+  `dupPlacement` nicht löst.
 - **Sequenzen**: `directSequence` propagiert `Zelle[k+1] = Zelle[k] + 1`
   (Domain per `<<1`); `directDescending` analog `Zelle[k+1] = Zelle[k] - 1`
   (Domain per `>>1`); `ascending` / `descending` propagieren die
