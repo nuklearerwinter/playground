@@ -1095,6 +1095,22 @@ function puzzleDifficulty(trace, clueCount) {
   return score + RULE_VARIETY_BONUS * types.size - CLUE_PENALTY * (clueCount || 0);
 }
 
+// Difficulty PROFILE from the per-step branching factor `b` (see commit()).
+// `maxB` is the single hardest survey a solver must do; `bands` counts how many
+// steps exceed each B threshold. A difficulty LEVEL is a ceiling on maxB plus
+// caps on these band counts (set empirically from the measured distribution).
+const B_BANDS = [3, 5, 8, 12, 20, 30];
+function puzzleProfile(trace) {
+  const prof = { maxB: 1, steps: (trace && trace.steps) ? trace.steps.length : 0, bands: {} };
+  for (const t of B_BANDS) prof.bands[t] = 0;
+  if (trace && trace.steps) for (const s of trace.steps) {
+    const b = s.b || 1;
+    if (b > prof.maxB) prof.maxB = b;
+    for (const t of B_BANDS) if (b > t) prof.bands[t]++;
+  }
+  return prof;
+}
+
 // === Lösungsweg: Schritt-für-Schritt-Solver (Trace) ===
 // Eigenständige, tracende Variante von logicalSolve (Worker). Gleiche Regeln,
 // aber sie protokolliert pro Zelle den Schritt + Grund. Liefert die Lösung
@@ -1167,7 +1183,7 @@ function solveWithTrace(clues) {
     if (removed) { domains[idx] &= mask; cur.set(idx, (cur.get(idx) || 0) | removed); if (domains[idx] === 0) bad = true; }
   }
   function begin() { cur = new Map(); }
-  function commit(reason, ruleType, clueInfo) {
+  function commit(reason, ruleType, clueInfo, b) {
     if (cur && cur.size) {
       const removals = [], solved = [];
       for (const [idx, mask] of cur) {
@@ -1175,7 +1191,10 @@ function solveWithTrace(clues) {
         removals.push({ idx, vals });
         if (isSingle(idx)) solved.push(idx);
       }
-      steps.push({ reason, ruleType, clue: clueInfo || null, removals, solved });
+      // b = branching factor: how many candidate configurations a human must
+      // survey to justify this step (1 for forced/cheap rules; the feasibility
+      // leaf count for lineFeasibility). The difficulty metric is built from it.
+      steps.push({ reason, ruleType, clue: clueInfo || null, removals, solved, b: b || 1 });
     }
     cur = null;
   }
@@ -1397,6 +1416,11 @@ function solveWithTrace(clues) {
     // Paar von Kandidaten übrig bleibt) gemeinsam ab.
     for (const ls of lineSearches) {
       const cells = ls.cells;
+      // Drain the cheap cascade BEFORE this line's expensive DFS, so that the
+      // consequences of a cell solved by an earlier line (e.g. distinctness
+      // striking a now-fixed value from this line) are credited to the cheap
+      // rule — not re-derived by the feasibility enumeration with an inflated B.
+      cascade(); if (bad) break;
       if (ls.snap) {
         let dirty = false;
         for (let j = 0; j < 6; j++) if (domains[cells[j]] !== ls.snap[j]) { dirty = true; break; }
@@ -1407,10 +1431,12 @@ function solveWithTrace(clues) {
       const support = [0, 0, 0, 0, 0, 0];
       const assigned = [0, 0, 0, 0, 0, 0];
       const usage = new Int8Array(10);
+      let nLeaf = 0; // valid full assignments = the human's survey size (B)
       function search(i, sumSoFar, dupLastPos) {
         if (i === 6) {
           if (target >= 0 && sumSoFar !== target) return;
           for (let v = 1; v <= 9; v++) if ((dupMask & (1 << (v - 1))) && usage[v] !== 2) return;
+          nLeaf++;
           for (let j = 0; j < 6; j++) support[j] |= 1 << (assigned[j] - 1);
           return;
         }
@@ -1437,7 +1463,7 @@ function solveWithTrace(clues) {
       begin();
       for (let j = 0; j < 6 && !bad; j++) keep(cells[j], support[j]);
       commit("Diese Werte passen in keine gültige Belegung dieser Linie.", "lineFeasibility",
-        { cells: cells.slice(), value: target, dupMask: dupMask, scope: ls.scope, index: ls.index });
+        { cells: cells.slice(), value: target, dupMask: dupMask, scope: ls.scope, index: ls.index }, nLeaf);
       if (bad) break;
       if (!ls.snap) ls.snap = new Array(6);
       for (let j = 0; j < 6; j++) ls.snap[j] = domains[cells[j]];
