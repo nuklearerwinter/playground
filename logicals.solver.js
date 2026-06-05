@@ -1145,6 +1145,10 @@ function puzzleProfile(trace) {
   const prof = { maxB: 1, steps: (trace && trace.steps) ? trace.steps.length : 0, bands: {} };
   for (const t of B_BANDS) prof.bands[t] = 0;
   if (trace && trace.steps) for (const s of trace.steps) {
+    // Sequence steps carry a display `b` > 1 (ordering reasoning isn't trivial),
+    // but they appear in the easy levels too and aren't a "needs-paper" survey —
+    // so they DON'T count toward the classification maxB/bands.
+    if (s.ruleType === "sequence") continue;
     const b = s.b || 1;
     if (b > prof.maxB) prof.maxB = b;
     for (const t of B_BANDS) if (b > t) prof.bands[t]++;
@@ -1622,6 +1626,11 @@ function solveWithTrace(clues) {
     // 6. Sequenzen
     for (const s of seqs) {
       const cells = s.cells;
+      // Reasoning along an ordered line is more than a forced single (b=1):
+      // weight by how many cells are still open. (Display only — sequence steps
+      // are excluded from the classification maxB in puzzleProfile, since they
+      // appear in the easy levels too and aren't a "needs-paper" survey.)
+      const seqB = 1 + cells.filter(idx => !isSingle(idx)).length;
       begin();
       if (s.type === "directSequence") {
         for (let k = 0; k < cells.length - 1; k++) { keep(cells[k + 1], (domains[cells[k]] << 1) & FULL); keep(cells[k], domains[cells[k + 1]] >> 1); }
@@ -1633,7 +1642,7 @@ function solveWithTrace(clues) {
         for (let k = 0; k < cells.length - 1; k++) { const mx = maxV(domains[cells[k]]); let m1 = 0; for (let v = 1; v <= mx - 1; v++) m1 |= bit(v); keep(cells[k + 1], m1); const mn = minV(domains[cells[k + 1]]); let m2 = 0; for (let v = mn + 1; v <= 9; v++) m2 |= bit(v); keep(cells[k], m2); }
       }
       commit("Diese Werte passen nicht mehr in die geforderte Reihenfolge.", "sequence",
-        { cells: s.cells.slice(), kind: s.type, scope: s.scope, index: s.index });
+        { cells: s.cells.slice(), kind: s.type, scope: s.scope, index: s.index }, seqB);
       if (bad) break;
     }
     if (bad) break;
