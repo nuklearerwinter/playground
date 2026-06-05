@@ -1606,6 +1606,7 @@ function solveWithTrace(clues) {
       const sumBoundB = 1 + openCount; // 3–7 in practice; stays ≤10 ⇒ level ≤ Mittel
       begin();
       let ex = null; // first struck (cell,value) + its bound, for a concrete reason
+      const struck = []; // every (cell,value) struck in this step, to explain ALL strikes
       for (let k = 0; k < 6 && !bad; k++) {
         const idx = cells[k];
         if (isSingle(idx)) continue;
@@ -1622,24 +1623,36 @@ function solveWithTrace(clues) {
               const witness = (mn === Infinity) ? null : distinctSumWitness(otherIdx, v, rest < mn);
               ex = { label: cl2(idx), v, rest, mn, mx, witness };
             }
+            struck.push({ idx, v });
             rmBit(idx, v);
           }
         }
       }
-      // Concrete reason naming one representative cell (the rest are struck the
-      // same way and shown in the strike list), e.g. "mit B1=9 müssten die fünf
-      // übrigen 18 ergeben — als verschiedene Zahlen sind aber mind. 19 nötig".
+      // Reason = ONE worked example (the representative `ex` with its witness),
+      // then a tail explaining why ALL the listed strikes follow — the same
+      // per-cell arithmetic, checked at every position. (Testers were confused
+      // that one example justified striking the value from several cells.)
       let reason = "Summe " + lineLabel + " = " + t.value + ".";
       if (ex) {
         const head = "In " + lineLabel + " sind alle sechs Zahlen verschieden und ergeben " + t.value + ". Mit " + ex.label + "=" + ex.v + " ";
         const witnessTxt = (label, total) =>
           ex.witness ? " (" + label + ": " + ex.witness.map(p => cl2(p.idx) + "=" + p.v).join(", ") + " = " + total + ")" : "";
+        let core;
         if (ex.mn === Infinity)
-          reason = head + "blieben für die übrigen fünf keine fünf verschiedenen Werte übrig. Solche Werte fallen weg.";
+          core = head + "blieben für die übrigen fünf keine fünf verschiedenen Werte übrig";
         else if (ex.rest < ex.mn)
-          reason = head + "müssten die übrigen fünf zusammen " + ex.rest + " ergeben — die kleinsten dort noch möglichen verschiedenen Werte ergeben aber schon " + ex.mn + witnessTxt("kleinstmöglich", ex.mn) + ". Solche Werte fallen weg.";
+          core = head + "müssten die übrigen fünf zusammen " + ex.rest + " ergeben — die kleinsten dort noch möglichen verschiedenen Werte ergeben aber schon " + ex.mn + witnessTxt("kleinstmöglich", ex.mn);
         else
-          reason = head + "müssten die übrigen fünf zusammen " + ex.rest + " ergeben — die größten dort noch möglichen verschiedenen Werte ergeben aber höchstens " + ex.mx + witnessTxt("größtmöglich", ex.mx) + ". Solche Werte fallen weg.";
+          core = head + "müssten die übrigen fünf zusammen " + ex.rest + " ergeben — die größten dort noch möglichen verschiedenen Werte ergeben aber höchstens " + ex.mx + witnessTxt("größtmöglich", ex.mx);
+        const valSet = new Set(struck.map(s => s.v));
+        let tail;
+        if (struck.length <= 1)
+          tail = ". Also kann " + ex.label + " keine " + ex.v + " sein.";
+        else if (valSet.size === 1)
+          tail = ". Dieselbe Rechnung schließt die " + ex.v + " auch in den übrigen unten markierten Zellen aus — jedes Mal würde die " + ex.v + " die geforderte Summe sprengen.";
+        else
+          tail = ". Nach derselben Prüfung — Stelle für Stelle — sprengen auch die übrigen unten markierten Kandidaten die Summe " + t.value + " und fallen weg.";
+        reason = core + tail;
       }
       commit(reason, "sumBound", { cells: cells.slice(), value: t.value, scope: t.scope, index: t.index }, sumBoundB);
       if (bad) break;
