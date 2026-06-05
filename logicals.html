@@ -130,10 +130,15 @@
      edge. The inner div is a normal block, fills the cell, and is a stable
      containing block. */
   table#grid td .cands, table#grid td .solved { position: relative; }
+  /* A cell can anchor BOTH a horizontal (pair-r, right border) and a vertical
+     (pair-b, bottom border) connector simultaneously — e.g. it's the left cell
+     of one pairSum and the top cell of another. So the two directions live on
+     SEPARATE pseudo-elements (::after = right, ::before = bottom); sharing one
+     ::after made the later-declared rule overwrite the other. */
   table#grid.pencil td.pair-r > .cands::after,
   table#grid.pencil td.pair-r > .solved::after,
-  table#grid.pencil td.pair-b > .cands::after,
-  table#grid.pencil td.pair-b > .solved::after {
+  table#grid.pencil td.pair-b > .cands::before,
+  table#grid.pencil td.pair-b > .solved::before {
     content: ""; position: absolute; background: var(--accent); border-radius: 2px;
     pointer-events: none; z-index: 2;
   }
@@ -142,8 +147,8 @@
     width: 0.9em; height: 3px; top: 0; bottom: 0; margin: auto 0;
     right: -0.45em; /* half of width → straddles the right border */
   }
-  table#grid.pencil td.pair-b > .cands::after,
-  table#grid.pencil td.pair-b > .solved::after {
+  table#grid.pencil td.pair-b > .cands::before,
+  table#grid.pencil td.pair-b > .solved::before {
     width: 3px; height: 0.9em; left: 0; right: 0; margin: 0 auto;
     bottom: -0.45em; /* half of height → straddles the bottom border */
   }
