@@ -91,12 +91,13 @@
   table#grid td .cands { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); width: 100%; height: 100%; font-size: calc(var(--cell) * 0.24); line-height: 1; color: #8a8a8a; font-family: Arial, Helvetica, sans-serif; }
   table#grid td .cands span { display: flex; align-items: center; justify-content: center; }
   /* Struck candidate: keep the digit red, but draw the strike as a DIAGONAL
-     black line (a red line-through on a red digit was barely visible on some
-     screens). The line sits on top of the glyph via ::after. */
+     line (a red line-through on a red digit was barely visible on some
+     screens). Thin (1px) so the digit stays readable underneath; the line
+     sits on top of the glyph via ::after. */
   table#grid td .cands span.removed { color: #c33; text-decoration: none; position: relative; }
   table#grid td .cands span.removed::after {
     content: ""; position: absolute; left: 50%; top: 50%;
-    width: 1.15em; height: 2px; background: #111;
+    width: 1.15em; height: 1px; background: #111;
     transform: translate(-50%, -50%) rotate(-40deg); transform-origin: center;
     pointer-events: none;
   }
@@ -130,7 +131,7 @@
   .step-rmv .cell-tag { font-weight: 700; color: var(--accent); font-family: Georgia, serif; font-size: 0.92em; }
   .strikes { display: inline-flex; gap: 0.25em; align-items: center; flex-wrap: wrap; }
   .strikes .d { position: relative; display: inline-block; font-family: Arial, Helvetica, sans-serif; color: #c33; text-decoration: none; font-weight: 600; font-size: 0.95em; min-width: 0.95em; text-align: center; }
-  .strikes .d::after { content: ""; position: absolute; left: 50%; top: 50%; width: 1.05em; height: 2px; background: #111; transform: translate(-50%, -50%) rotate(-40deg); transform-origin: center; pointer-events: none; }
+  .strikes .d::after { content: ""; position: absolute; left: 50%; top: 50%; width: 1.05em; height: 1px; background: #111; transform: translate(-50%, -50%) rotate(-40deg); transform-origin: center; pointer-events: none; }
   .step-combos { margin-top: 0.45em; padding-top: 0.35em; border-top: 1px dashed #ddd; color: #555; font-size: 0.88em; font-family: Arial, Helvetica, sans-serif; }
   .step-combos .lbl { color: #888; }
   /* pair-sum connector: short bar centered on the shared border. The pseudo is
