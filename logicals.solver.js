@@ -1517,6 +1517,7 @@ function solveWithTrace(clues) {
       if (t.dupMask) continue; // dup lines: left to dup-place + feasibility
       const cells = t.cells, lineLabel = t.scope === "row" ? rowLabel(t.index) : colLabel(t.index);
       begin();
+      let ex = null; // first struck (cell,value) + its bound, for a concrete reason
       for (let k = 0; k < 6 && !bad; k++) {
         const idx = cells[k];
         if (isSingle(idx)) continue;
@@ -1525,11 +1526,26 @@ function solveWithTrace(clues) {
           const others = []; for (let j = 0; j < 6; j++) if (j !== k) others.push(domains[cells[j]]);
           const [mn, mx] = distinctSumRange(others, v);
           const rest = t.value - v;
-          if (mn === Infinity || rest < mn || rest > mx) rmBit(idx, v);
+          if (mn === Infinity || rest < mn || rest > mx) {
+            if (!ex) ex = { label: cl2(idx), v, rest, mn, mx };
+            rmBit(idx, v);
+          }
         }
       }
-      commit("Bei lauter verschiedenen Zahlen lässt sich die Summe " + t.value + " in " + lineLabel + " mit diesen Werten nicht erreichen — die übrigen Zellen lägen außerhalb der möglichen Summe.", "sumBound",
-        { cells: cells.slice(), value: t.value, scope: t.scope, index: t.index });
+      // Concrete reason naming one representative cell (the rest are struck the
+      // same way and shown in the strike list), e.g. "mit B1=9 müssten die fünf
+      // übrigen 18 ergeben — als verschiedene Zahlen sind aber mind. 19 nötig".
+      let reason = "Summe " + lineLabel + " = " + t.value + ".";
+      if (ex) {
+        const head = "In " + lineLabel + " sind alle sechs Zahlen verschieden und ergeben " + t.value + ". Mit " + ex.label + "=" + ex.v + " ";
+        if (ex.mn === Infinity)
+          reason = head + "blieben für die übrigen fünf keine fünf verschiedenen Werte übrig. Solche Werte fallen weg.";
+        else if (ex.rest < ex.mn)
+          reason = head + "müssten die übrigen fünf zusammen " + ex.rest + " ergeben — als fünf verschiedene Zahlen sind aber mindestens " + ex.mn + " nötig. Solche Werte fallen weg.";
+        else
+          reason = head + "müssten die übrigen fünf zusammen " + ex.rest + " ergeben — als fünf verschiedene Zahlen sind aber höchstens " + ex.mx + " möglich. Solche Werte fallen weg.";
+      }
+      commit(reason, "sumBound", { cells: cells.slice(), value: t.value, scope: t.scope, index: t.index });
       if (bad) break;
     }
     if (bad) break;
