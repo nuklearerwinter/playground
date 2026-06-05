@@ -525,7 +525,9 @@ function combosHtmlForStep(step, dom) {
     const doms = cl.cells.map(idx => dom[idx]);
     const minsL = new Array(7).fill(0), maxsL = new Array(7).fill(0);
     for (let i=5;i>=0;i--){ minsL[i]=minsL[i+1]+minV(doms[i]); maxsL[i]=maxsL[i+1]+maxV(doms[i]); }
-    const cap = 30, out = [];
+    // Cap high enough to report the exact count (sum-bounded enumeration is
+    // small in practice); "über N" only in pathological cases.
+    const cap = 5000, out = [];
     function rec(k, sum, t) {
       if (out.length >= cap) return;
       if (k === 6) { if (sum === cl.value) out.push(t.slice()); return; }
@@ -582,7 +584,10 @@ function combosHtmlForStep(step, dom) {
     rec(0, 0, -2);
     const kind = target >= 0 ? "Summenkombinationen" : "Belegungen";
     const tail = whyStruck(kind);
-    if (out.length >= cap) return `<span class="lbl">Es gibt noch über ${cap} mögliche ${kind}.</span>` + tail;
+    // The exact count is step.b (the solver's uncapped leaf count = the number
+    // of valid assignments). The local enumeration above only lists the small
+    // cases; for larger ones show the concrete number instead of "über N".
+    if (out.length >= cap) return `<span class="lbl">Es gibt noch ${step.b || out.length} mögliche ${kind}.</span>` + tail;
     return listOrCount(out, t => `<b>${fmtTuple(t, "+")}</b>`, kind) + tail;
   }
   if (step.ruleType === "sequence") {
