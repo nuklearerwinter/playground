@@ -684,7 +684,10 @@ function renderStep() {
     const li = document.createElement("li");
     li.dataset.step = i + 1;
     li.className = "step-card" + (i === stepIndex - 1 ? " current" : "");
-    let html = '<header class="step-head">' + clueHeadHtml(s) + '</header>';
+    const b = s.b || 1;
+    const bClass = "step-b" + (b > 8 ? " hard" : "");
+    const bBadge = '<span class="' + bClass + '" title="Verzweigungsfaktor: so viele mögliche Belegungen müsste man hier überblicken (1 = eindeutig erzwungen)">B = ' + b + '</span>';
+    let html = '<header class="step-head">' + clueHeadHtml(s) + bBadge + '</header>';
     if (s.reason) html += '<div class="step-desc">' + s.reason + '</div>';
     if (s.removals && s.removals.length) {
       html += '<ul class="step-rmv">';
