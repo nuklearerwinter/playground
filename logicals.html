@@ -26,6 +26,10 @@
   .settings-grid .slider-row .slider-modifier input { margin: 0 0.3em 0 0; }
   .settings-note { color: #777; font-size: 0.82em; line-height: 1.35; margin: 0.6em 0 0; }
   .settings-actions { margin: 0.5em 0 0; }
+  .difficulty-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3em 0.9em; margin: 0.6em 0 0; font-size: 0.95em; }
+  .difficulty-picker-label { font-weight: bold; }
+  .difficulty-picker label { cursor: pointer; white-space: nowrap; }
+  .difficulty-picker input { margin: 0 0.3em 0 0; }
 
   /* Manual puzzle entry: a <details> panel mirroring the settings style,
      with two columns of inputs (rows A-F | cols 1-6) and action buttons. */
@@ -250,46 +254,16 @@
   <section class="controls" id="controls">
     <button id="generate-btn">Neues Rätsel</button>
     <button id="print-btn" disabled>Drucken</button>
-    <p class="controls-hint">Es wird nach einem möglichst hinweisarmen, eindeutig per Logik lösbaren Rätsel gesucht — je weniger Hinweise, desto schwerer.
-      Die Suche läuft bis zu 5 Minuten oder bis Sie das aktuell beste Rätsel übernehmen.</p>
-    <details class="settings">
-      <summary>Einstellungen</summary>
-      <div class="settings-grid">
-        <label for="cfg-seq">Sequenzen</label>
-        <div class="slider-row">
-          <input type="range" id="cfg-seq" min="0" max="3" step="1" value="1">
-          <output for="cfg-seq">1</output>
-          <label class="slider-modifier"><input type="checkbox" id="cfg-seq-random"> zufällig 1–3</label>
-        </div>
-        <label for="cfg-totalsum">Summen-Hinweise (min.)</label>
-        <div class="slider-row">
-          <input type="range" id="cfg-totalsum" min="0" max="6" step="1" value="4">
-          <output for="cfg-totalsum">4</output>
-        </div>
-        <label for="cfg-maxtotalsum">Summen-Hinweise (max.)</label>
-        <div class="slider-row">
-          <input type="range" id="cfg-maxtotalsum" min="0" max="7" step="1" value="4">
-          <output for="cfg-maxtotalsum">4</output>
-        </div>
-        <label for="cfg-dup">Dopplungen (max.)</label>
-        <div class="slider-row">
-          <input type="range" id="cfg-dup" min="0" max="7" step="1" value="5">
-          <output for="cfg-dup">5</output>
-        </div>
-        <label for="cfg-mindup">Dopplungen (min.)</label>
-        <div class="slider-row">
-          <input type="range" id="cfg-mindup" min="0" max="7" step="1" value="3">
-          <output for="cfg-mindup">3</output>
-        </div>
-        <label for="cfg-fewerpair">Weniger Paarsummen</label>
-        <label><input type="checkbox" id="cfg-fewerpair"> mehr Linien-Summen statt vieler PairSums</label>
-      </div>
-      <p class="settings-note">„Summen-Hinweise (min./max.)" steuert das Fenster für „Summe aller Zahlen"-Hinweise; aktuelle Standardwerte (4–4) entsprechen dem Magazin-Schnitt.
-        „Dopplungen (min.)" ≥ 3 sorgt für magazintypische Cross-Line-Kopplung. Strenge Werte (viele Sequenzen, hohe Min-Dopplungen) verlängern die Suche etwas.</p>
-      <div class="settings-actions">
-        <button type="button" id="cfg-reset-btn" class="link-btn">Standardwerte wiederherstellen</button>
-      </div>
-    </details>
+    <div class="difficulty-picker" id="difficulty-picker">
+      <span class="difficulty-picker-label">Schwierigkeit:</span>
+      <label><input type="radio" name="level" value="1"> Sehr leicht</label>
+      <label><input type="radio" name="level" value="2"> Leicht</label>
+      <label><input type="radio" name="level" value="3" checked> Mittel</label>
+      <label><input type="radio" name="level" value="4"> Schwer</label>
+      <label><input type="radio" name="level" value="5"> Sehr schwer</label>
+    </div>
+    <p class="controls-hint">Wählen Sie eine Schwierigkeitsstufe und erzeugen Sie ein Rätsel. Die Stufe bestimmt, wie viel man im Kopf durchdenken muss
+      (von „nie mehr als ein offensichtlicher Schritt" bis „auch mal mit Zettel"). Höhere Stufen brauchen etwas länger zum Finden.</p>
     <div id="progress" hidden>
       <progress id="progress-bar" max="100" value="0"></progress>
       <span id="status">Erzeuge Rätsel …</span>

@@ -1065,38 +1065,38 @@ function workerCode() {
   self.onmessage = function(e) {
     const data = e.data || {};
     const cfg = data.config || {};
-    let best = (typeof data.threshold === "number") ? data.threshold : Infinity;
     const seqMode = cfg.numSequences;                              // "random" or 0–3
     const maxDup = (typeof cfg.maxDupLines === "number") ? cfg.maxDupLines : 5;
     const minDup = (typeof cfg.minDupLines === "number") ? cfg.minDupLines : 0;
     const minTS = (typeof cfg.minTotalSum === "number") ? cfg.minTotalSum : 0;
     const maxTS = (typeof cfg.maxTotalSum === "number") ? cfg.maxTotalSum : 99;
     const fewerPairSums = !!cfg.fewerPairSums;
-    // Tick every ~250ms (time-based, not attempt-count-based) so the UI's
-    // attempt counter updates regardless of how slow individual attempts are.
-    let sinceTick = 0;
-    let nextTickAt = Date.now() + 250;
+    // The main thread classifies each candidate by difficulty LEVEL (via the
+    // trace), so the worker just streams VARIETY: it posts the latest accepted
+    // puzzle, throttled to ~8/sec, regardless of clue count. (Posting every
+    // generated puzzle would flood the main thread; the clue-count gate is
+    // gone because fewest-clues is no longer the objective.) Tick ~250ms for
+    // the attempt counter.
+    let sinceTick = 0, nextTickAt = Date.now() + 250;
+    let pending = null, nextPostAt = 0;
     for (;;) {
       sinceTick++;
       const numSeq = (typeof seqMode === "number") ? seqMode : 1 + ((Math.random() * 3) | 0);
       const grid = generateGrid(numSeq, maxDup, minDup);
       if (grid) {
         const clues = pickClues(grid, { targetClues: 0, minTotalSum: minTS, maxTotalSum: maxTS, numSequences: numSeq, fewerPairSums: fewerPairSums });
-        if (clues) {
-          const cc = clueCountOf(clues);
-          // Emit on equal-or-better clueCount so the main thread can re-rank
-          // by difficulty score (Phase 2B). Strict-less would funnel only the
-          // first puzzle of each clue count, hiding higher-difficulty ties.
-          if (cc <= best) {
-            best = cc;
-            self.postMessage({ type: "candidate", grid: grid, clues: clues, clueCount: cc });
-          }
-        }
+        if (clues) pending = { grid: grid, clues: clues, clueCount: clueCountOf(clues) };
       }
-      if (Date.now() >= nextTickAt) {
+      const now = Date.now();
+      if (pending && now >= nextPostAt) {
+        self.postMessage({ type: "candidate", grid: pending.grid, clues: pending.clues, clueCount: pending.clueCount });
+        pending = null;
+        nextPostAt = now + 120;
+      }
+      if (now >= nextTickAt) {
         self.postMessage({ type: "tick", attempts: sinceTick });
         sinceTick = 0;
-        nextTickAt = Date.now() + 250;
+        nextTickAt = now + 250;
       }
     }
   };
@@ -1150,6 +1150,42 @@ function puzzleProfile(trace) {
     for (const t of B_BANDS) if (b > t) prof.bands[t]++;
   }
   return prof;
+}
+
+// Five difficulty levels. Classification combines TWO axes, because maxB alone
+// is bimodal (a huge "maxB=1, no feasibility" blob, then a tail): the HARD end
+// is separated by maxB (the single hardest survey), the EASY end by which clue
+// TYPES are present (a duplicate to track ⇒ at least "Leicht"; a line-sum to
+// reason about ⇒ at least "Mittel"). `cfg` biases generation toward the band
+// (clue-type mix + the per-level maxTotalSum/duplicate counts); the actual gate
+// is puzzleLevel() on the solved trace + clue features.
+const LEVELS = [
+  { id: 1, name: "Sehr leicht", cfg: { minTotalSum: 0, maxTotalSum: 0, minDupLines: 0, maxDupLines: 0, fewerPairSums: false } },
+  { id: 2, name: "Leicht",      cfg: { minTotalSum: 0, maxTotalSum: 0, minDupLines: 1, maxDupLines: 1, fewerPairSums: false } },
+  { id: 3, name: "Mittel",      cfg: { minTotalSum: 1, maxTotalSum: 2, minDupLines: 1, maxDupLines: 1, fewerPairSums: false } },
+  { id: 4, name: "Schwer",      cfg: { minTotalSum: 2, maxTotalSum: 4, minDupLines: 1, maxDupLines: 2, fewerPairSums: false } },
+  { id: 5, name: "Sehr schwer", cfg: { minTotalSum: 3, maxTotalSum: 6, minDupLines: 2, maxDupLines: 2, fewerPairSums: false } },
+];
+// Clue-type features that gate the easy end (read from the clue SET, not the
+// trace — a sum/duplicate clue counts even if cheap rules dissolve it to b=1).
+function clueFeatures(clues) {
+  let hasSum = false, dupCount = 0;
+  for (const list of clues.rowClues.concat(clues.colClues)) for (const cl of list) {
+    if (cl.type === "totalSum") hasSum = true;
+    else if (cl.type === "duplicate") dupCount++;
+  }
+  return { hasSum, dupCount };
+}
+// Difficulty level (1–5) from the trace profile + clue features. maxB ceilings
+// gate the hard end; clue types gate the easy end. Many very-hard steps (b>12)
+// force the top level even below the maxB ceiling.
+function puzzleLevel(profile, feat) {
+  const maxB = profile.maxB, veryHard = profile.bands[12] || 0;
+  if (maxB > 30 || veryHard > 2) return 5;
+  if (maxB > 10) return 4;
+  if (maxB > 4 || (feat && feat.hasSum)) return 3;
+  if (maxB > 1 || (feat && feat.dupCount >= 1)) return 2;
+  return 1;
 }
 
 // === Lösungsweg: Schritt-für-Schritt-Solver (Trace) ===

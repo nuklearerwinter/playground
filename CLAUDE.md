@@ -20,8 +20,8 @@ load time, so `logicals.solver.js` must load first.
 
 This is the only non-trivial file. Before editing it, read
 [LOGICALS_ALGORITHM.md](LOGICALS_ALGORITHM.md) — it covers the puzzle rules,
-the propagation-only `logicalSolve` acceptance gate, the REDUCE+rebalance clue
-selection, and the three difficulty presets.
+the propagation-only `logicalSolve` acceptance gate, clue selection, and the
+trace-based 5-level difficulty system (per-step branching factor `b`).
 
 Architectural points that are non-obvious from the code:
 
@@ -53,31 +53,48 @@ Architectural points that are non-obvious from the code:
   totalSum before pairSum). That removes totalSum hints almost entirely and
   yields ~11–20 clues depending on luck. The `targetClues > 0` rebalance path
   still exists but is unused by the app.
-- **Configurable clue types via a `keep` flag.** A collapsible settings panel
-  feeds a config (`readConfig`) that the main thread sends to every worker and
-  reuses on "Weiter suchen": `numSequences` (`"random"` or 0–3), `minTotalSum`
-  (0–3), `maxDupLines` (0–5), `minDupLines` (0–5, UI-clamped to ≤ maxDup),
-  `fewerPairSums` (boolean). `pickClues` marks up to that many sequence and
-  totalSum clues with `keep`; kept clues (like mandatory duplicates) are never
-  removed. **Sequences are NOT auto-protected anymore** — only the marked ones
-  are, so coincidental sequence lines from the random fill get minimised away
-  and the shown count matches the setting (rarely +1 if load-bearing).
-  `maxDupLines` / `minDupLines` are passed to `generateGrid` / `gridQualityOK`
-  (a grid must have `minDup ≤ dupLines ≤ maxDup`; otherwise rejected).
-  `fewerPairSums` flips `removeRank` so pairSum tries to be dropped before
-  totalSum during reduction — shifts the typical mix from ~13 pair / 2 sum /
-  1 dup to ~9 pair / 5 sum / 2 dup (yield drops ~10× but still ample for the
-  tournament).  Current defaults: `minTotalSum=2`, `maxDupLines=2`,
-  `minDupLines=2`, `fewerPairSums=true`. `pairSum` (the clue type, not the
-  reducer knob) is deliberately not configurable — it's the deducibility
-  backbone.
-- **Difficulty = clue count = search time (no fixed presets).** The worker
-  loops forever, generating + minimising and posting a puzzle only when it
-  beats its fewest-clue count so far; the main thread runs ~4 such workers as
-  a **time-budget tournament** (`startSearch`/`searchTick`/`finishSearch`),
-  keeps the global minimum, shows it live, and runs the full budget (~6 s) or
-  until "Übernehmen". "Weiter suchen" extends by +10 s. Fewer clues ⇒ harder.
-  Workers are stopped via `terminate()` (the loop has no exit).
+- **Difficulty = 5 levels, classified from the solve trace (no sliders).** The
+  old per-knob settings panel is gone; the UI is one radio group (`name="level"`,
+  1–5). The real difficulty signal is **`b`, the per-step branching factor** —
+  how many candidate configurations a human must survey to justify a step
+  (recorded on every trace step by `commit`; the `lineFeasibility` DFS counts
+  its leaves, all cheap/forced rules are `b=1`). `puzzleProfile(trace)` →
+  `{ maxB, bands }` (band counts of `#(b>3/5/8/12/20/30)`). A level is decided
+  by `puzzleLevel(profile, clueFeatures(clues))`: the HARD end by `maxB`
+  ceilings (>30 or many `b>12` ⇒ 5; >10 ⇒ 4), the EASY end by clue TYPES
+  (a line-sum present ⇒ ≥ Mittel; a duplicate ⇒ ≥ Leicht) — because `maxB` is
+  bimodal (a huge `maxB=1` blob, then a tail), so it alone can't split the easy
+  levels. `clueFeatures` reads the clue SET, not the trace (a sum/dup clue
+  counts even if cheap rules dissolve it to `b=1`).
+- **Two cheap rules keep `b` honest** (both in `logicalSolve` AND
+  `solveWithTrace`, run BEFORE the feasibility DFS, mirror together): `dupPlacement`
+  (adjacency-aware duplicate placement — the doubled value fits only in cells
+  that list it, two must be non-adjacent) and `sumBound` (distinctness-aware
+  totalSum bound via `distinctSumRange`'s DP — strike `v` from a cell when, with
+  it placed and the rest DISTINCT, the target sum is unreachable). They reproduce
+  the cheap human shortcuts the brute-force feasibility DFS was finding with a
+  hugely inflated `b` (~40 % of feasibility eliminations); without them `maxB`
+  over-classified ~40 % of sum puzzles as too hard. **Soundness is preserved by
+  confluence** — these only reorder which rule gets credit; the fixpoint is
+  unchanged, so the acceptance gate is untouched.
+- **`LEVELS` carries each level's generation `cfg`** (`minTotalSum`,
+  `maxTotalSum`, `minDupLines`, `maxDupLines`, `fewerPairSums`) which BIASES
+  generation toward the band (e.g. L1 = no sums/dups ⇒ `maxB=1`; L5 =
+  `minTotalSum:3` for big enumerations). `cfg` is only a bias; `puzzleLevel` is
+  the gate. **Avoid `fewerPairSums:true`** — it tanks generator yield ~10× (it's
+  why L5 escalates via `minTotalSum` instead). `pickClues` is still always called
+  with `{ targetClues: 0 }` (full minimisation); clue count is no longer a
+  difficulty knob.
+- **Tournament targets a band, doesn't maximise** (`startSearch` /
+  `onWorkerMessage` / `searchTick` / `finishSearch`). ~4 workers stream puzzles
+  (latest-accepted, throttled ~8/s — VARIETY, not fewest-clues); the main thread
+  `solveWithTrace`s each, classifies by level, and keeps the fewest-clue
+  **in-band** representative (`bestInBand`), with a closest-level `bestFallback`
+  if none match. **Early-stop** once the best is stable (`MIN_SEARCH_MS` +
+  `STALL_MS`); hard cap `DEFAULT_BUDGET_MS` (15 s). Per-level hit rates ≈
+  100/95/71/26/47 % (L4 leaks down to L3 — fine, the filter + ample yield handle
+  it). The shown puzzle displays its own level (computed from its trace, so it's
+  correct for code-loaded puzzles too).
 - **Grid generation injects sequences first.** Random fills almost never
   produce sequence lines, so the generator pre-fixes 0–3 lines (count from
   config / random) as sequences before backtracking the rest; `pickClues`

@@ -2,7 +2,8 @@
 
 Dieses Dokument beschreibt die interne Funktionsweise von `logicals.html`: wie
 die Gitter erzeugt werden, wie die Hinweise ausgewählt werden, wie der Solver
-arbeitet und wie das Zeit-Turnier die Hinweiszahl (= Schwierigkeit) minimiert.
+arbeitet und wie das Turnier Rätsel einer gewählten Schwierigkeitsstufe trifft
+(Klassifizierung aus dem Lösungsweg über den Branching-Faktor `b`).
 
 ## Spielregeln
 
@@ -41,12 +42,10 @@ bindend: `logicals.app.js` baut `WORKER_SRC` zur Ladezeit aus
 
 Die Erzeugung läuft in **Web Workers** (`workerCode()`, per
 `Blob` + `URL.createObjectURL` als Worker-Skript geladen). Bis zu 4 Worker
-laufen parallel als **Zeit-Turnier**: jeder erzeugt und minimiert
-fortlaufend Rätsel und meldet immer dann eines, wenn es weniger Hinweise hat
-als sein bisher bestes. Der Hauptthread hält über alle Worker das globale
-Minimum, zeigt es live an und beendet die Worker nach Ablauf des Zeitbudgets
-(oder per „Übernehmen", oder bei Stagnation). Siehe „Suchstrategie &
-Schwierigkeit".
+streamen fortlaufend (gedrosselt) Rätsel; der Hauptthread klassifiziert jedes
+über den Lösungsweg nach **Schwierigkeitsstufe** und behält das beste, das die
+gewählte Stufe trifft. Beendet per Frühstopp, „Übernehmen" oder Zeit-Hardcap.
+Siehe „Schwierigkeit: 5 Stufen".
 
 Der Hauptthread kümmert sich um UI, Encoding/Decoding des **Rätselcodes**
 (Crockford-Base32, 31–42 Zeichen mit Prüfsumme — enthält die Hinweise, nicht
@@ -235,57 +234,51 @@ Funktion (Brace-Matching extrahieren): gelöst, zurückgespielte `removals` ==
 Lösung, kein Entfernen abwesender Werte, kein Entfernen des *Lösungswerts*, keine
 geleerte Domain, und lückenlose Sequenzen werden gebündelt gefüllt.
 
-## Suchstrategie & Schwierigkeit (Zeit-Turnier)
+## Schwierigkeit: 5 Stufen, aus dem Lösungsweg klassifiziert
 
-Es gibt **keine festen Schwierigkeitsstufen** mehr. Stattdessen bestimmt die
-**Hinweiszahl** die Schwierigkeit (weniger Hinweise ⇒ schwerer), und die
-**Suchzeit** bestimmt, wie weit minimiert wird.
+Statt Slidern wählt der Nutzer **eine von 5 Stufen** (Sehr leicht … Sehr schwer,
+Radio-Group `name="level"`). Die Schwierigkeit wird **aus dem Trace gemessen**,
+nicht aus der Hinweiszahl.
 
-Worker-Schleife (`self.onmessage`, läuft endlos bis `terminate()`):
+**`b` = Branching-Faktor pro Schritt.** Jeder Trace-Schritt trägt `b`: wie viele
+Kandidaten-Belegungen ein Mensch überblicken müsste, um den Schritt zu
+rechtfertigen. Die `lineFeasibility`-DFS zählt ihre Blätter; alle billigen/
+erzwungenen Regeln sind `b=1`. `puzzleProfile(trace)` → `{ maxB, bands }`
+(`maxB` = härtester Einzelschritt; `bands` = Zähler `#(b>3/5/8/12/20/30)`).
 
-1. Sequenzanzahl bestimmen (laut Config oder zufällig 1–3), Gitter erzeugen
-   (`generateGrid(numSeq, maxDupLines)`),
-2. `pickClues(grid, { targetClues: 0, numSequences, minTotalSum })` →
-   minimales deduzierbares Set unter Beachtung der erzwungenen Typen,
-3. nur posten, wenn die Hinweiszahl unter dem bisher besten Wert liegt
-   (`threshold` erlaubt, bei „Weiter suchen" nur echte Verbesserungen zu
-   melden).
+**`puzzleLevel(profile, clueFeatures(clues))`** kombiniert zwei Achsen, weil
+`maxB` bimodal ist (ein großer `maxB=1`-Block, dann ein Tail):
+- **hartes Ende über `maxB`**: `>30` oder viele `b>12` ⇒ 5; `>10` ⇒ 4;
+- **leichtes Ende über Hinweis-Typen** (`clueFeatures` liest die *Clue-Menge*,
+  nicht den Trace): eine Liniensumme vorhanden ⇒ ≥ Mittel; ein Duplikat ⇒
+  ≥ Leicht; sonst (reine pairSum/Sequenz, `maxB=1`) ⇒ Sehr leicht.
 
-Hauptthread (`startSearch` / `searchTick` / `finishSearch`):
+`LEVELS` trägt pro Stufe eine Generier-`cfg` (`minTotalSum`, `maxTotalSum`,
+`minDupLines`, `maxDupLines`, `fewerPairSums`), die die Generierung **ins Band
+biast** (L1: keine Summen/Dups ⇒ `maxB=1`; L5: `minTotalSum:3` für große
+Enumerationen). Die `cfg` ist nur ein Bias — die eigentliche Einstufung macht
+`puzzleLevel`. **`fewerPairSums:true` vermeiden** (senkt die Yield ~10× — daher
+eskaliert L5 über `minTotalSum` statt darüber).
 
-- Standard-Budget **~6 s** (`DEFAULT_BUDGET_MS`), „Weiter suchen" hängt
-  jeweils **+10 s** an (`EXTEND_MS`).
-- **Adaptiver Frühstopp**: keine Verbesserung seit `STALL_MS` (2,5 s) und
-  mindestens `MIN_MS` (3 s) gelaufen → Suche beenden.
-- **„Übernehmen"** beendet sofort und nimmt das aktuell beste Rätsel.
-- Fortschrittsbalken läuft über die Zeit; der Status zeigt live die kleinste
-  bisher gefundene Hinweiszahl und die Versuchszahl.
+**Turnier trifft ein Band, maximiert nicht** (`startSearch` / `onWorkerMessage`
+/ `searchTick` / `finishSearch`):
 
-Mehr Suchzeit ⇒ weniger Hinweise ⇒ schwerer. Die Hinweiszahl wird am Rätsel
-und im Druck angezeigt.
+- Worker-Schleife (`self.onmessage`, endlos bis `terminate()`): Gitter erzeugen,
+  `pickClues(grid, { targetClues: 0, … })` (volle Minimierung — Hinweiszahl ist
+  kein Schwierigkeitsknopf mehr), und das zuletzt akzeptierte Rätsel **gedrosselt
+  (~alle 120 ms)** posten → Vielfalt statt „wenigste Hinweise".
+- Hauptthread: `solveWithTrace` pro Kandidat → `puzzleLevel`. Behält das
+  hinweisärmste **In-Band**-Rätsel (`bestInBand`); ohne Treffer das
+  nächstliegende (`bestFallback`).
+- **Frühstopp**, sobald das Beste `STALL_MS` (1,5 s) stabil ist und mindestens
+  `MIN_SEARCH_MS` (1,2 s) lief; Hardcap `DEFAULT_BUDGET_MS` (15 s);
+  „Übernehmen" beendet sofort.
+- Trefferquoten je Stufe ≈ **100 / 95 / 71 / 26 / 47 %** (L4 leckt nach L3 —
+  unkritisch: der Filter + reichlich Yield fangen es ab). Das angezeigte Rätsel
+  zeigt seine *eigene* Stufe (aus seinem Trace berechnet, also auch für per-Code
+  geladene Rätsel korrekt).
 
-### Konfigurierbare Hinweis-Typen
-
-Ein einklappbares „Einstellungen"-Feld liefert eine Config, die der Hauptthread
-(`readConfig`) je Suche an alle Worker schickt (bei „Weiter suchen" wird
-dieselbe Config wiederverwendet):
-
-- **`numSequences`** (`zufällig` oder 0–3): so viele Sequenz-Linien werden ins
-  Gitter eingestreut **und** in `pickClues` geschützt. Der Zufallsfüller
-  erzeugt gelegentlich *zusätzliche* Sequenz-Linien; da `pickClues` nur N
-  Sequenzen schützt und der Rest entfernbar ist, entspricht die angezeigte
-  Anzahl der Einstellung (selten +1, falls eine zufällige Sequenz für die
-  Deduzierbarkeit gebraucht wird).
-- **`minTotalSum`** (0–3): so viele `totalSum`-Hinweise werden geschützt
-  (sonst entfernt die Minimierung sie praktisch immer). Kostet je ~1 Hinweis.
-- **`maxDupLines`** (0–5): Obergrenze für Dopplungslinien im Gitter
-  (`gridQualityOK`). 0 = nie „kommt doppelt vor".
-
-Geschützte Hinweise tragen in `pickClues` ein `keep`-Flag und werden — wie
-Mandatory-Duplikate — nicht entfernt. `pairSum` ist bewusst nicht
-konfigurierbar (Rückgrat der Lösbarkeit; die Minimierung lässt genau die
-nötige Menge übrig). Strenge Kombinationen (viele Sequenzen, erzwungene
-totalSums, wenige Dopplungen) senken die Trefferquote der Gittererzeugung.
+`pairSum` ist bewusst kein konfigurierbarer Typ (Rückgrat der Lösbarkeit).
 
 ## Performance
 

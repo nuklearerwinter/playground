@@ -15,19 +15,24 @@ function getWorkerUrl() {
 let currentPuzzle = null;
 let activeWorkers = [];
 
-// === Time-budget tournament ===
-// Several workers minimise clue counts in parallel; the main thread keeps the
-// global best (fewest clues), shows it live, and runs for the full time budget
-// (or until the user accepts the current best via the in-progress button).
-const DEFAULT_BUDGET_MS = 5 * 60 * 1000; // 5 minutes — hard cap; accept stops sooner
+// === Difficulty-level tournament ===
+// Several workers stream puzzles generated with the level's config; the main
+// thread classifies each by difficulty LEVEL (puzzleLevel on the trace), keeps
+// the fewest-clue in-band representative, shows it live, and early-stops once
+// the best is stable (or accept / hard cap).
+const DEFAULT_BUDGET_MS = 15 * 1000; // hard cap; early-stop usually finishes much sooner
+const MIN_SEARCH_MS = 1200;          // search at least this long (gather a few in-band puzzles)
+const STALL_MS = 1500;               // …then stop once the best hasn't improved for this long
 
-
-
-let globalBest = null;   // { grid, clues, clueCount, difficulty, trace }
+let bestInBand = null;   // candidate whose level === targetLevel, fewest clues
+let bestFallback = null; // closest-level candidate (only used if none in-band)
+let targetLevel = 3;
+let lastImproveAt = 0;   // when chosenBest last improved (for early-stop)
 let searchTimer = null;
 let searchStart = 0, searchDeadline = 0, totalAttempts = 0;
 let searching = false;
-let searchConfig = null; // clue-type config for the current/most-recent search
+let searchConfig = null; // generation config for the current/most-recent search
+function chosenBest() { return bestInBand || bestFallback; }
 
 function el(id) { return document.getElementById(id); }
 function killWorkers() {
@@ -35,23 +40,15 @@ function killWorkers() {
   activeWorkers = [];
 }
 
-// Read the clue-type controls. Defaults reproduce prior behaviour:
-// sequences random 1–3, no forced totalSum, up to 5 duplicate lines.
+// The selected difficulty level (1–5) and the generation config that biases
+// generation toward its band. The actual gate is puzzleLevel() on the trace.
 function readConfig() {
-  const maxDup = parseInt(el("cfg-dup").value, 10);
-  // Clamp minDup ≤ maxDup so impossible grid targets never reach the worker.
-  // Without the clamp the worker would spin forever (every grid rejected).
-  const minDup = Math.min(parseInt(el("cfg-mindup").value, 10), maxDup);
-  const minTS = parseInt(el("cfg-totalsum").value, 10);
-  const maxTS = Math.max(parseInt(el("cfg-maxtotalsum").value, 10), minTS);
-  const seqRandom = el("cfg-seq-random").checked;
+  const sel = document.querySelector('input[name="level"]:checked');
+  const level = sel ? parseInt(sel.value, 10) : 3;
+  const lv = LEVELS[level - 1];
   return {
-    numSequences: seqRandom ? "random" : parseInt(el("cfg-seq").value, 10),
-    minTotalSum: minTS,
-    maxTotalSum: maxTS,
-    maxDupLines: maxDup,
-    minDupLines: minDup,
-    fewerPairSums: el("cfg-fewerpair").checked,
+    level,
+    config: Object.assign({ numSequences: "random" }, lv.cfg),
   };
 }
 
@@ -61,14 +58,18 @@ function updateSearchStatus() {
   bar.max = 1000;
   const span = searchDeadline - searchStart;
   bar.value = span > 0 ? Math.round(Math.min(1, (now - searchStart) / span) * 1000) : 0;
-  const best = globalBest
-    ? `${globalBest.clueCount} Hinweise · Score ${globalBest.difficulty}`
-    : "suche …";
+  const b = chosenBest();
+  let best;
+  if (!b) best = "suche …";
+  else {
+    const mb = b.profile.maxB === Infinity ? "∞" : b.profile.maxB;
+    const miss = b.level !== targetLevel ? ` (Ziel: ${LEVELS[targetLevel - 1].name})` : "";
+    best = `${LEVELS[b.level - 1].name}${miss} · ${b.clueCount} Hinweise · maxB ${mb}`;
+  }
   const secsLeft = Math.max(0, Math.ceil((searchDeadline - now) / 1000));
   const countdown = secsLeft >= 60 ? `noch ${Math.floor(secsLeft / 60)}m ${secsLeft % 60}s` : `noch ${secsLeft}s`;
   el("status").textContent = `Bestes Rätsel: ${best} · ${totalAttempts} Versuche · ${countdown}`;
-  // Accept is available as soon as we have any candidate to take.
-  el("accept-btn").disabled = !globalBest;
+  el("accept-btn").disabled = !b;
 }
 
 function onWorkerMessage(e) {
@@ -77,19 +78,20 @@ function onWorkerMessage(e) {
   if (d.type === "tick") {
     totalAttempts += d.attempts;
   } else if (d.type === "candidate") {
-    // Score the candidate. Workers still post on monotone clueCount drops, so
-    // ranking is over a fewest-clues-first sample — good enough as long as the
-    // tournament gets several improvements per search.
     const trace = solveWithTrace(d.clues);
     if (!trace.solved) return; // safety net; should not happen if worker accepted.
-    const difficulty = puzzleDifficulty(trace, d.clueCount);
-    const isBetter = !globalBest
-      || difficulty > globalBest.difficulty
-      || (difficulty === globalBest.difficulty && d.clueCount < globalBest.clueCount);
-    if (isBetter) {
-      globalBest = { grid: d.grid, clues: d.clues, clueCount: d.clueCount, difficulty, trace };
-      el("accept-btn").disabled = false;
-      updateSearchStatus();
+    const profile = puzzleProfile(trace);
+    const level = puzzleLevel(profile, clueFeatures(d.clues));
+    const cand = { grid: d.grid, clues: d.clues, clueCount: d.clueCount, trace, profile, level };
+    if (level === targetLevel) {
+      // In band: keep the fewest-clue representative (mild elegance preference).
+      if (!bestInBand || d.clueCount < bestInBand.clueCount) { bestInBand = cand; lastImproveAt = Date.now(); updateSearchStatus(); }
+    } else if (!bestInBand) {
+      // No exact match yet: track the closest level as a fallback.
+      const dist = Math.abs(level - targetLevel);
+      if (!bestFallback || dist < bestFallback._dist || (dist === bestFallback._dist && d.clueCount < bestFallback.clueCount)) {
+        cand._dist = dist; bestFallback = cand; lastImproveAt = Date.now(); updateSearchStatus();
+      }
     }
   }
 }
@@ -110,16 +112,25 @@ function spawnWorkers() {
 
 function searchTick() {
   updateSearchStatus();
-  if (Date.now() >= searchDeadline) finishSearch();
+  const now = Date.now();
+  // Early stop: once we have an in-band puzzle that has been stable for STALL_MS
+  // (and we've searched the minimum), there's little point continuing. Without
+  // an in-band match, keep going to the hard cap to maximise the chance of one.
+  const stable = bestInBand && now - searchStart >= MIN_SEARCH_MS && now - lastImproveAt >= STALL_MS;
+  if (stable || now >= searchDeadline) finishSearch();
 }
 
 function startSearch(budgetMs) {
-  globalBest = null;
-  searchConfig = readConfig();
+  bestInBand = null;
+  bestFallback = null;
+  const rc = readConfig();
+  targetLevel = rc.level;
+  searchConfig = rc.config;
   killWorkers();
   searching = true;
   totalAttempts = 0;
   searchStart = Date.now();
+  lastImproveAt = searchStart;
   searchDeadline = searchStart + budgetMs;
 
   el("generate-btn").disabled = true;
@@ -144,19 +155,23 @@ function finishSearch() {
   el("progress").hidden = true; // accept-btn lives inside #progress, so it hides with it
   el("generate-btn").disabled = false;
 
-  if (!globalBest) {
+  const best = chosenBest();
+  if (!best) {
     el("error").textContent = `Kein lösbares Rätsel gefunden. Bitte „Neues Rätsel" erneut versuchen.`;
     return;
   }
-  const code = encodePuzzle(globalBest.clues);
-  currentPuzzle = { grid: globalBest.grid, clues: globalBest.clues, code, clueCount: globalBest.clueCount, trace: globalBest.trace };
+  if (best.level !== targetLevel) {
+    el("error").textContent = `Keine ${LEVELS[targetLevel - 1].name}-Stufe gefunden — zeige die nächstliegende (${LEVELS[best.level - 1].name}). „Neues Rätsel" erneut versuchen oder Stufe wechseln.`;
+  }
+  const code = encodePuzzle(best.clues);
+  currentPuzzle = { grid: best.grid, clues: best.clues, code, clueCount: best.clueCount, trace: best.trace, level: best.level };
   renderPuzzle(currentPuzzle);
   el("print-btn").disabled = false;
   el("steps-btn").disabled = false;
 }
 
 function newSearch() { startSearch(DEFAULT_BUDGET_MS); }
-function acceptNow() { if (globalBest) finishSearch(); } // ignore until first candidate
+function acceptNow() { if (chosenBest()) finishSearch(); } // ignore until first candidate
 
 function buildGridTable() {
   const tbl = document.getElementById("grid");
@@ -214,7 +229,12 @@ function renderPuzzle(p) {
   document.getElementById("hints-block").hidden = false;
   document.getElementById("code-block").hidden = false;
   document.getElementById("difficulty-display").hidden = false;
-  document.getElementById("difficulty-label").textContent = `${p.clueCount} Hinweise`;
+  // Show the puzzle's actual difficulty level (computed from its own trace, so
+  // it's correct for generated AND code-loaded puzzles) plus the clue count.
+  let lvl = p.level;
+  if (!lvl && p.trace) lvl = puzzleLevel(puzzleProfile(p.trace), clueFeatures(p.clues));
+  const lvlName = lvl ? LEVELS[lvl - 1].name : "?";
+  document.getElementById("difficulty-label").textContent = `${lvlName} · ${p.clueCount} Hinweise`;
 
   const rowHints = document.getElementById("row-hints");
   rowHints.innerHTML = "";
@@ -713,89 +733,6 @@ function exitStepMode() {
 }
 function toggleSteps() { if (stepMode) exitStepMode(); else enterStepMode(); }
 
-// Canonical default settings. HTML defaults (value/checked attrs) must match
-// these — they're the same numbers in two places, so any tweak goes here AND
-// in the markup. resetConfig() restores from here.
-const DEFAULT_CONFIG = {
-  numSequencesSlider: 1,
-  numSequencesRandom: false,
-  minTotalSum: 4,
-  maxTotalSum: 4,
-  maxDupLines: 5,
-  minDupLines: 3,
-  fewerPairSums: false,
-};
-function applyConfig(cfg) {
-  el("cfg-seq").value = cfg.numSequencesSlider;
-  el("cfg-seq-random").checked = cfg.numSequencesRandom;
-  el("cfg-seq").disabled = cfg.numSequencesRandom;
-  el("cfg-totalsum").value = cfg.minTotalSum;
-  el("cfg-maxtotalsum").value = cfg.maxTotalSum;
-  el("cfg-dup").value = cfg.maxDupLines;
-  el("cfg-mindup").value = cfg.minDupLines;
-  el("cfg-fewerpair").checked = cfg.fewerPairSums;
-  // Push the new values into the live-display outputs.
-  for (const id of ["cfg-seq", "cfg-totalsum", "cfg-maxtotalsum", "cfg-dup", "cfg-mindup"]) {
-    const s = el(id);
-    s.parentNode.querySelector('output[for="' + id + '"]').textContent = s.value;
-  }
-}
-function resetConfig() { applyConfig(DEFAULT_CONFIG); }
-
-// Live value display next to each slider; output is updated on drag.
-function bindSliderOutput(sliderId) {
-  const slider = el(sliderId);
-  const out = slider.parentNode.querySelector('output[for="' + sliderId + '"]');
-  if (!out) return;
-  const sync = () => out.textContent = slider.value;
-  slider.addEventListener("input", sync);
-  sync();
-}
-bindSliderOutput("cfg-seq");
-bindSliderOutput("cfg-totalsum");
-bindSliderOutput("cfg-maxtotalsum");
-bindSliderOutput("cfg-dup");
-bindSliderOutput("cfg-mindup");
-el("cfg-reset-btn").addEventListener("click", resetConfig);
-
-// Keep min-/max-totalSum mutually consistent (max ≥ min).
-el("cfg-totalsum").addEventListener("input", () => {
-  const mn = el("cfg-totalsum"), mx = el("cfg-maxtotalsum");
-  if (+mn.value > +mx.value) {
-    mx.value = mn.value;
-    mx.parentNode.querySelector('output[for="cfg-maxtotalsum"]').textContent = mx.value;
-  }
-});
-el("cfg-maxtotalsum").addEventListener("input", () => {
-  const mn = el("cfg-totalsum"), mx = el("cfg-maxtotalsum");
-  if (+mn.value > +mx.value) {
-    mn.value = mx.value;
-    mn.parentNode.querySelector('output[for="cfg-totalsum"]').textContent = mn.value;
-  }
-});
-
-// "Zufällig 1-3"-checkbox overrides the seq slider; dim slider when checked.
-el("cfg-seq-random").addEventListener("change", () => {
-  el("cfg-seq").disabled = el("cfg-seq-random").checked;
-});
-
-// Keep min-/max-dup sliders mutually consistent so readConfig's clamp never
-// silently overrides what the user sees. React on the `input` event so the
-// constraint also tracks the drag, not just the release.
-el("cfg-mindup").addEventListener("input", () => {
-  const mn = el("cfg-mindup"), mx = el("cfg-dup");
-  if (+mn.value > +mx.value) {
-    mx.value = mn.value;
-    mx.parentNode.querySelector('output[for="cfg-dup"]').textContent = mx.value;
-  }
-});
-el("cfg-dup").addEventListener("input", () => {
-  const mn = el("cfg-mindup"), mx = el("cfg-dup");
-  if (+mn.value > +mx.value) {
-    mn.value = mx.value;
-    mn.parentNode.querySelector('output[for="cfg-mindup"]').textContent = mn.value;
-  }
-});
 
 document.getElementById("generate-btn").addEventListener("click", newSearch);
 document.getElementById("accept-btn").addEventListener("click", acceptNow);
