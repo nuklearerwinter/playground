@@ -656,6 +656,21 @@ function workerCode() {
       }
       return [go(0, 0, true), go(0, 0, false)];
     }
+    // Naked pair: two cells of a line restricted to the SAME 2-set {a,b} (and
+    // neither the line's duplicate) must be a and b between them -> strike a,b
+    // from the rest of the line. Mirror of solveWithTrace's nakedPairLine; sound
+    // (confluent, same fixpoint) so the acceptance gate is unchanged.
+    function nakedPair(cells, dupMask) {
+      const groups = new Map();
+      for (let p = 0; p < 6; p++) { const d = domains[cells[p]]; if (POPCOUNT[d] === 2) { if (!groups.has(d)) groups.set(d, []); groups.get(d).push(p); } }
+      for (const [mask, pos] of groups) {
+        if (pos.length !== 2 || (mask & dupMask)) continue;
+        for (let p = 0; p < 6 && !bad; p++) {
+          if (p === pos[0] || p === pos[1]) continue;
+          for (let v = 1; v <= 9; v++) if (mask & (1 << (v - 1))) clearBit(cells[p], v);
+        }
+      }
+    }
     function sumBound(cells, target) {
       for (let k = 0; k < 6 && !bad; k++) {
         const idx = cells[k];
@@ -762,6 +777,11 @@ function workerCode() {
       }
       if (bad) break;
 
+      // Naked pairs per row/col — cheap distinctness; runs before the DFS.
+      for (let r = 0; r < N && !bad; r++) { const cs = []; for (let k = 0; k < N; k++) cs.push(r*N + k); nakedPair(cs, rowDup[r]); }
+      if (bad) break;
+      for (let c = 0; c < N && !bad; c++) { const cs = []; for (let k = 0; k < N; k++) cs.push(k*N + c); nakedPair(cs, colDup[c]); }
+      if (bad) break;
       // Duplicate placement (adjacency-aware) — cheap; runs before the DFS.
       for (const ls of lineSearches) { if (ls.dupMask) dupPlacement(ls.cells, ls.dupMask); if (bad) break; }
       if (bad) break;
@@ -1403,6 +1423,29 @@ function solveWithTrace(clues) {
     return [go(0, 0, true), go(0, 0, false)];
   }
 
+  // Naked pair: two cells of a line whose candidate sets are the SAME 2-set
+  // {a,b} must take a and b between them, so a and b are used up in this line —
+  // strike both from the other cells. The obvious human move ("these two cells
+  // are the 8 and the 9, so no other cell here can be 8 or 9"), b=1. Sound only
+  // when the pair EXCLUDES the line's duplicate value: if a (or b) were the
+  // doubled value, the two cells could both be it, and the other value need not
+  // be placed here at all. (3+ cells sharing a 2-set are left to feasibility.)
+  function bitCount(d) { let n = 0; for (let v = 1; v <= 9; v++) if (d & bit(v)) n++; return n; }
+  function nakedPairLine(cells, dupMask, label, scope) {
+    const groups = new Map();
+    for (let p = 0; p < 6; p++) { const d = domains[cells[p]]; if (bitCount(d) === 2) { if (!groups.has(d)) groups.set(d, []); groups.get(d).push(p); } }
+    for (const [mask, pos] of groups) {
+      if (pos.length !== 2 || (mask & dupMask)) continue;
+      const vals = []; for (let v = 1; v <= 9; v++) if (mask & bit(v)) vals.push(v);
+      begin();
+      for (let p = 0; p < 6 && !bad; p++) { if (p === pos[0] || p === pos[1]) continue; for (const v of vals) rmBit(cells[p], v); }
+      commit(cl2(cells[pos[0]]) + " und " + cl2(cells[pos[1]]) + " können in " + label + " nur " + vals.join(" oder ") +
+        " sein — zwei Zellen für zwei Werte. Damit sind " + vals.join(" und ") + " hier vergeben und fallen in den übrigen Zellen weg.",
+        "naked-pair", { cells: cells.slice(), pair: [cells[pos[0]], cells[pos[1]]], values: vals, scope, label });
+      if (bad) return;
+    }
+  }
+
   // Propagation bis zum Fixpunkt. Jede Regelanwendung, die mindestens einen
   // Kandidaten entfernt, ergibt EINEN Schritt (mit Begründung + entfernten Werten).
   let guard = 0;
@@ -1417,6 +1460,14 @@ function solveWithTrace(clues) {
     if (bad) break;
     cascade(); if (bad) break;
     for (let c = 0; c < N && !bad; c++) unit(k => k * N + c, colDup[c], colLabel(c), "col");
+    if (bad) break;
+    cascade(); if (bad) break;
+    // 2b. Naked Pairs je Reihe/Spalte (vor Summen/Feasibility, damit der billige
+    //     Schritt die Streichung beansprucht statt sumBound mit aufgeblähtem b).
+    for (let r = 0; r < N && !bad; r++) { const cs = []; for (let k = 0; k < N; k++) cs.push(r * N + k); nakedPairLine(cs, rowDup[r], rowLabel(r), "row"); }
+    if (bad) break;
+    cascade(); if (bad) break;
+    for (let c = 0; c < N && !bad; c++) { const cs = []; for (let k = 0; k < N; k++) cs.push(k * N + c); nakedPairLine(cs, colDup[c], colLabel(c), "col"); }
     if (bad) break;
     cascade(); if (bad) break;
     // 3. Globale Zählung: jede Zahl genau 4×, plus zwei Verschärfungen pro Wert:

@@ -483,6 +483,8 @@ function clueHeadHtml(step) {
       return `<span class="chip dup">doppelte <b>${cl.value}</b> in ${cl.label}</span>`;
     case "dup-place":
       return `<span class="chip dup"><b>${cl.value} doppelt in ${scopeLabel(cl)}</b> · Platzierung</span>`;
+    case "naked-pair":
+      return `<span class="chip dist"><b>${cl.pair.map(lab).join(", ")} = ${cl.values.join("/")}</b> · nacktes Paar · ${cl.label}</span>`;
     default: return `<span class="chip">${step.ruleType || ""}</span>`;
   }
 }

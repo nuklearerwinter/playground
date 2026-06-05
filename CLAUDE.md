@@ -80,17 +80,24 @@ Architectural points that are non-obvious from the code:
   - **clue-type FLOOR** (`sum ⇒ ≥3, duplicate ⇒ ≥2`) gates the easy end;
     `clueFeatures` reads the clue SET, not the trace (a sum/dup counts even if
     cheap rules dissolve it to `b=1`).
-- **Two cheap rules keep `b` honest** (both in `logicalSolve` AND
+- **Three cheap rules keep `b` honest** (all in `logicalSolve` AND
   `solveWithTrace`, run BEFORE the feasibility DFS, mirror together): `dupPlacement`
   (adjacency-aware duplicate placement — the doubled value fits only in cells
-  that list it, two must be non-adjacent) and `sumBound` (distinctness-aware
+  that list it, two must be non-adjacent); `sumBound` (distinctness-aware
   totalSum bound via `distinctSumRange`'s DP — strike `v` from a cell when, with
-  it placed and the rest DISTINCT, the target sum is unreachable). They reproduce
-  the cheap human shortcuts the brute-force feasibility DFS was finding with a
-  hugely inflated `b` (~40 % of feasibility eliminations); without them `maxB`
-  over-classified ~40 % of sum puzzles as too hard. **Soundness is preserved by
-  confluence** — these only reorder which rule gets credit; the fixpoint is
-  unchanged, so the acceptance gate is untouched.
+  it placed and the rest DISTINCT, the target sum is unreachable); and `nakedPair`
+  (two cells of a line restricted to the SAME 2-set `{a,b}` must BE `a` and `b`
+  between them ⇒ strike `a,b` from the rest of the line — the obvious "these two
+  cells are the 8 and the 9, so nothing else here is 8 or 9" move, `b=1`). They
+  reproduce the cheap human shortcuts the brute-force feasibility DFS was finding
+  with a hugely inflated `b`; without them `maxB`/`b` over-classified sum puzzles
+  as too hard. **nakedPair is sound only when the pair EXCLUDES the line's
+  duplicate value** (`mask & dupMask` ⇒ skip: the two cells could both be the
+  doubled value, so neither value is necessarily consumed); it fires on EVERY line
+  (not just sum/dup lines), so unlike the other two it can let the gate accept a
+  few more puzzles (ones needing a naked-pair on a plain pairSum/distinct line —
+  genuinely human-deducible, so correct). **Soundness is preserved by
+  confluence** — these reorder which rule gets credit; the fixpoint is unchanged.
 - **`LEVELS` carries each level's generation `cfg`** (`minTotalSum`,
   `maxTotalSum`, `minDupLines`, `maxDupLines`, `fewerPairSums`) which BIASES
   generation toward the band (e.g. L1 = no sums/dups ⇒ `maxB=1`; L5 =

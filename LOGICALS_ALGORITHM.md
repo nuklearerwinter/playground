@@ -124,6 +124,17 @@ Pro Durchlauf werden angewandt:
   Läuft **vor** der Feasibility-DFS und ist die billige menschliche Abkürzung,
   die die DFS sonst per Brute Force fände (5×2 passt B5/C5/F5, B5–C5 benachbart
   ⇒ F5=5). Senkt damit auch den gemessenen Aufwand `B` (siehe Schwierigkeit).
+- **Nacktes Paar (`nakedPair`)**: Zwei Zellen einer Linie mit *derselben*
+  2er-Kandidatenmenge `{a,b}` belegen zusammen `a` und `b` ⇒ beide fallen in
+  allen übrigen Zellen der Linie weg. Der offensichtliche menschliche Schritt
+  („diese beiden Zellen sind die 8 und die 9, also ist sonst hier nichts 8 oder
+  9"), `b=1`. **Nur sound, wenn das Paar den Duplikat-Wert der Linie ausschließt**
+  (`mask & dupMask` ⇒ überspringen — sonst könnten beide Zellen der doppelte Wert
+  sein). Läuft **vor** der Feasibility-DFS und auf **jeder** Linie (auch reinen
+  pairSum/Distinktheits-Linien ohne DFS), sonst würde `sumBound`/Feasibility diese
+  triviale Streichung mit aufgeblähtem `B` beanspruchen. Greift auf einer
+  DFS-losen Linie ⇒ kann das Gate ein paar **mehr** Rätsel akzeptieren (echt
+  deduzierbar, daher korrekt).
 - **Linien-Feasibility-DFS**: Für jede Linie mit Summe und/oder Duplikat zählt
   eine DFS alle gültigen 6-Wert-Belegungen auf; Werte ohne Vorkommen werden
   gestrichen. Fängt extreme Summen + komplexere Duplikat-Fälle ab, die
