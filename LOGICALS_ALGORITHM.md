@@ -242,16 +242,20 @@ nicht aus der Hinweiszahl.
 
 **`b` = Branching-Faktor pro Schritt.** Jeder Trace-Schritt trägt `b`: wie viele
 Kandidaten-Belegungen ein Mensch überblicken müsste, um den Schritt zu
-rechtfertigen. Die `lineFeasibility`-DFS zählt ihre Blätter; alle billigen/
-erzwungenen Regeln sind `b=1`. `puzzleProfile(trace)` → `{ maxB, bands }`
+rechtfertigen. Die `lineFeasibility`-DFS zählt ihre Blätter; billige/erzwungene
+Regeln sind `b=1`, `sumBound` ist `1+offene Zellen`, `sequence` ≈ die Hälfte
+davon (Sequenzen sind leichter). `puzzleProfile(trace)` → `{ maxB, bands }`
 (`maxB` = härtester Einzelschritt; `bands` = Zähler `#(b>3/5/8/12/20/30)`).
 
-**`puzzleLevel(profile, clueFeatures(clues))`** kombiniert zwei Achsen, weil
-`maxB` bimodal ist (ein großer `maxB=1`-Block, dann ein Tail):
-- **hartes Ende über `maxB`**: `>30` oder viele `b>12` ⇒ 5; `>10` ⇒ 4;
-- **leichtes Ende über Hinweis-Typen** (`clueFeatures` liest die *Clue-Menge*,
-  nicht den Trace): eine Liniensumme vorhanden ⇒ ≥ Mittel; ein Duplikat ⇒
-  ≥ Leicht; sonst (reine pairSum/Sequenz, `maxB=1`) ⇒ Sehr leicht.
+**`puzzleLevel = max(StufeAusMaxB, StufeAusHinweistyp)`** — zwei Achsen, weil
+`maxB` allein das leichte Ende nicht trennt:
+- **`maxB`-Stufen** (hoch angesetzt, weil jede Sequenz-Linie über die erste
+  Voll-Linien-Propagation eine `maxB≈4`-Grundlinie liefert): `>40` (oder viele
+  `b>12`) ⇒ 5; `>16` ⇒ 4; `>8` ⇒ 3; `>4` ⇒ 2; sonst 1.
+- **Hinweistyp-Boden** (`clueFeatures` liest die *Clue-Menge*, nicht den Trace):
+  Liniensumme vorhanden ⇒ ≥ Mittel; Duplikat vorhanden ⇒ ≥ Leicht.
+Trefferquoten ≈ 100/94/78/16/42 %; L4 ist konfigurationsbedingt niedrig (sehr
+breite `maxB`-Streuung der L4-Config).
 
 `LEVELS` trägt pro Stufe eine Generier-`cfg` (`minTotalSum`, `maxTotalSum`,
 `minDupLines`, `maxDupLines`, `fewerPairSums`), die die Generierung **ins Band
@@ -273,7 +277,7 @@ eskaliert L5 über `minTotalSum` statt darüber).
 - **Frühstopp**, sobald das Beste `STALL_MS` (1,5 s) stabil ist und mindestens
   `MIN_SEARCH_MS` (1,2 s) lief; Hardcap `DEFAULT_BUDGET_MS` (15 s);
   „Übernehmen" beendet sofort.
-- Trefferquoten je Stufe ≈ **100 / 95 / 71 / 26 / 47 %** (L4 leckt nach L3 —
+- Trefferquoten je Stufe ≈ **100 / 94 / 78 / 16 / 42 %** (L4 leckt nach L3 —
   unkritisch: der Filter + reichlich Yield fangen es ab). Das angezeigte Rätsel
   zeigt seine *eigene* Stufe (aus seinem Trace berechnet, also auch für per-Code
   geladene Rätsel korrekt).

@@ -58,14 +58,16 @@ Architectural points that are non-obvious from the code:
   1–5). The real difficulty signal is **`b`, the per-step branching factor** —
   how many candidate configurations a human must survey to justify a step
   (recorded on every trace step by `commit`; the `lineFeasibility` DFS counts
-  its leaves, all cheap/forced rules are `b=1`). `puzzleProfile(trace)` →
-  `{ maxB, bands }` (band counts of `#(b>3/5/8/12/20/30)`). A level is decided
-  by `puzzleLevel(profile, clueFeatures(clues))`: the HARD end by `maxB`
-  ceilings (>30 or many `b>12` ⇒ 5; >10 ⇒ 4), the EASY end by clue TYPES
-  (a line-sum present ⇒ ≥ Mittel; a duplicate ⇒ ≥ Leicht) — because `maxB` is
-  bimodal (a huge `maxB=1` blob, then a tail), so it alone can't split the easy
-  levels. `clueFeatures` reads the clue SET, not the trace (a sum/dup clue
-  counts even if cheap rules dissolve it to `b=1`).
+  its leaves, all cheap/forced rules are `b=1`; `sumBound` and `sequence` steps
+  are `1+openCells` resp. `~half` of that — sequences are easier). `puzzleProfile`
+  → `{ maxB, bands }` (band counts of `#(b>3/5/8/12/20/30)`). A level is
+  `puzzleLevel(profile, clueFeatures(clues)) = max(tierByMaxB, floorByClueType)`:
+  tier-by-maxB `>40` (or many `b>12`) ⇒ 5, `>16` ⇒ 4, `>8` ⇒ 3, `>4` ⇒ 2, else
+  1; floor `sum ⇒ ≥3, duplicate ⇒ ≥2`. The maxB tiers sit high because every
+  sequence-bearing puzzle gets a ~4 baseline from the first full-line sequence
+  propagation. The clue-type FLOOR is needed because maxB is otherwise bimodal
+  (it can't split the easy levels alone); `clueFeatures` reads the clue SET, not
+  the trace (a sum/dup counts even if cheap rules dissolve it to `b=1`).
 - **Two cheap rules keep `b` honest** (both in `logicalSolve` AND
   `solveWithTrace`, run BEFORE the feasibility DFS, mirror together): `dupPlacement`
   (adjacency-aware duplicate placement — the doubled value fits only in cells
@@ -92,7 +94,7 @@ Architectural points that are non-obvious from the code:
   **in-band** representative (`bestInBand`), with a closest-level `bestFallback`
   if none match. **Early-stop** once the best is stable (`MIN_SEARCH_MS` +
   `STALL_MS`); hard cap `DEFAULT_BUDGET_MS` (15 s). Per-level hit rates ≈
-  100/95/71/26/47 % (L4 leaks down to L3 — fine, the filter + ample yield handle
+  100/94/78/16/42 % (L4 leaks down to L3 — fine, the filter + ample yield handle
   it). The shown puzzle displays its own level (computed from its trace, so it's
   correct for code-loaded puzzles too).
 - **Grid generation injects sequences first.** Random fills almost never
