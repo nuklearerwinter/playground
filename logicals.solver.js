@@ -1142,21 +1142,26 @@ function puzzleDifficulty(trace, clueCount) {
 // caps on these band counts (set empirically from the measured distribution).
 const B_BANDS = [3, 5, 8, 12, 20, 30];
 function puzzleProfile(trace) {
-  const prof = { maxB: 1, steps: (trace && trace.steps) ? trace.steps.length : 0, bands: {} };
+  const prof = { maxB: 1, steps: (trace && trace.steps) ? trace.steps.length : 0, bands: {}, nFeas: 0 };
   for (const t of B_BANDS) prof.bands[t] = 0;
   if (trace && trace.steps) for (const s of trace.steps) {
     const b = s.b || 1;
     if (b > prof.maxB) prof.maxB = b;
     for (const t of B_BANDS) if (b > t) prof.bands[t]++;
+    // nFeas = how many lines needed the heavy feasibility enumeration. Since B is
+    // now combination-counted (bounded ~≤15), this COUNT — not the single worst
+    // survey — is what separates the hard levels (L3≈1, L4≈2, L5≈3 such lines).
+    if (s.ruleType === "lineFeasibility") prof.nFeas++;
   }
   return prof;
 }
 
-// Five difficulty levels. Classification combines TWO axes, because maxB alone
-// is bimodal (a huge "maxB=1, no feasibility" blob, then a tail): the HARD end
-// is separated by maxB (the single hardest survey), the EASY end by which clue
-// TYPES are present (a duplicate to track ⇒ at least "Leicht"; a line-sum to
-// reason about ⇒ at least "Mittel"). `cfg` biases generation toward the band
+// Five difficulty levels. Classification takes the MAX of three axes, because no
+// single axis spans all five. Since B is combination-counted (bounded ~≤15), the
+// single hardest survey (maxB) only separates the EASY end (1–3); the HARD end
+// (4–5) is driven by how MANY lines need feasibility reasoning (nFeas). Clue
+// TYPES set a floor for the easy end (a duplicate to track ⇒ ≥"Leicht"; a
+// line-sum to reason about ⇒ ≥"Mittel"). `cfg` biases generation toward the band
 // (clue-type mix + the per-level maxTotalSum/duplicate counts); the actual gate
 // is puzzleLevel() on the solved trace + clue features.
 const LEVELS = [
@@ -1176,21 +1181,20 @@ function clueFeatures(clues) {
   }
   return { hasSum, dupCount };
 }
-// Difficulty level (1–5) from the trace profile + clue features. maxB ceilings
-// gate the hard end; clue types gate the easy end. Many very-hard steps (b>12)
-// force the top level even below the maxB ceiling.
+// Difficulty level (1–5) = max of three axes. (1) maxB: with combination-counting
+// it tops out ~15 and only separates 1–3 (sequences give a ~4 baseline, so >4⇒2,
+// >6⇒3). (2) nFeas + mid-band count: how many lines need heavy feasibility
+// reasoning — the real hard-end signal (≥2 lines ⇒ Schwer, ≥4 lines or ≥4 steps
+// with b>5 ⇒ Sehr schwer). (3) clue-type floor (sum ⇒ ≥3, dup ⇒ ≥2). Thresholds
+// calibrated empirically; hit rates ≈ 100/93/76/55/57 %.
 function puzzleLevel(profile, feat) {
-  const maxB = profile.maxB, veryHard = profile.bands[12] || 0;
-  // Level = max(tier-by-maxB, floor-by-clue-type). Sequences now contribute to
-  // maxB (≈4 baseline from the first full-line propagation), so the maxB tiers
-  // are shifted up to absorb that; clue types set a floor (sum ⇒ ≥3, dup ⇒ ≥2).
+  const maxB = profile.maxB, nFeas = profile.nFeas || 0, mid = profile.bands[5] || 0;
   let byB = 1;
-  if (maxB > 40 || veryHard > 2) byB = 5;
-  else if (maxB > 16) byB = 4;
-  else if (maxB > 8) byB = 3;
-  else if (maxB > 4) byB = 2;
+  if (maxB > 6) byB = 3; else if (maxB > 4) byB = 2;
+  let byWork = 1;
+  if (nFeas >= 4 || mid >= 4) byWork = 5; else if (nFeas >= 2) byWork = 4;
   const byFeat = (feat && feat.hasSum) ? 3 : (feat && feat.dupCount >= 1) ? 2 : 1;
-  return Math.max(byB, byFeat);
+  return Math.max(byB, byWork, byFeat);
 }
 
 // === Lösungsweg: Schritt-für-Schritt-Solver (Trace) ===
@@ -1585,12 +1589,19 @@ function solveWithTrace(clues) {
       const support = [0, 0, 0, 0, 0, 0];
       const assigned = [0, 0, 0, 0, 0, 0];
       const usage = new Int8Array(10);
-      let nLeaf = 0; // valid full assignments = the human's survey size (B)
+      // B = the human's survey size = the number of distinct value-COMBINATIONS
+      // (multisets) that fill this line, NOT the number of ordered cell
+      // assignments. A person reasons "which sets of values fit here?", then
+      // places them; they don't re-survey every permutation. Counting orderings
+      // inflated B ~3-10× (e.g. a duplicate line's two equal values plus the
+      // distinct rest permute many ways for one and the same combination), which
+      // made forced/near-forced lines look far harder than they are.
+      const combos = new Set();
       function search(i, sumSoFar, dupLastPos) {
         if (i === 6) {
           if (target >= 0 && sumSoFar !== target) return;
           for (let v = 1; v <= 9; v++) if ((dupMask & (1 << (v - 1))) && usage[v] !== 2) return;
-          nLeaf++;
+          combos.add(assigned.slice().sort((x, y) => x - y).join(","));
           for (let j = 0; j < 6; j++) support[j] |= 1 << (assigned[j] - 1);
           return;
         }
@@ -1617,7 +1628,7 @@ function solveWithTrace(clues) {
       begin();
       for (let j = 0; j < 6 && !bad; j++) keep(cells[j], support[j]);
       commit("Diese Werte passen in keine gültige Belegung dieser Linie.", "lineFeasibility",
-        { cells: cells.slice(), value: target, dupMask: dupMask, scope: ls.scope, index: ls.index }, nLeaf);
+        { cells: cells.slice(), value: target, dupMask: dupMask, scope: ls.scope, index: ls.index }, combos.size);
       if (bad) break;
       if (!ls.snap) ls.snap = new Array(6);
       for (let j = 0; j < 6; j++) ls.snap[j] = domains[cells[j]];

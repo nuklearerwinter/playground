@@ -551,7 +551,10 @@ function combosHtmlForStep(step, dom) {
     const doms = cells.map(idx => dom[idx]);
     const target = (typeof cl.value === "number") ? cl.value : -1;
     const dupMask = cl.dupMask | 0;
-    const cap = 30, out = [];
+    // List distinct value-COMBINATIONS (multisets), not ordered assignments —
+    // matches the B metric (combos.size in solveWithTrace) and how a person
+    // surveys the line. Dedup orderings via a sorted-key set.
+    const cap = 30, out = [], seenCombo = new Set();
     const usage = new Int8Array(10);
     const assigned = [0, 0, 0, 0, 0, 0];
     function rec(i, sumSoFar, dupLastPos) {
@@ -559,7 +562,8 @@ function combosHtmlForStep(step, dom) {
       if (i === 6) {
         if (target >= 0 && sumSoFar !== target) return;
         for (let v = 1; v <= 9; v++) if ((dupMask & (1 << (v - 1))) && usage[v] !== 2) return;
-        out.push(assigned.slice());
+        const sorted = assigned.slice().sort((a, b) => a - b), key = sorted.join(",");
+        if (!seenCombo.has(key)) { seenCombo.add(key); out.push(sorted); }
         return;
       }
       if (target >= 0) {

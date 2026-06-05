@@ -57,17 +57,24 @@ Architectural points that are non-obvious from the code:
   old per-knob settings panel is gone; the UI is one radio group (`name="level"`,
   1–5). The real difficulty signal is **`b`, the per-step branching factor** —
   how many candidate configurations a human must survey to justify a step
-  (recorded on every trace step by `commit`; the `lineFeasibility` DFS counts
-  its leaves, all cheap/forced rules are `b=1`; `sumBound` and `sequence` steps
-  are `1+openCells` resp. `~half` of that — sequences are easier). `puzzleProfile`
-  → `{ maxB, bands }` (band counts of `#(b>3/5/8/12/20/30)`). A level is
-  `puzzleLevel(profile, clueFeatures(clues)) = max(tierByMaxB, floorByClueType)`:
-  tier-by-maxB `>40` (or many `b>12`) ⇒ 5, `>16` ⇒ 4, `>8` ⇒ 3, `>4` ⇒ 2, else
-  1; floor `sum ⇒ ≥3, duplicate ⇒ ≥2`. The maxB tiers sit high because every
-  sequence-bearing puzzle gets a ~4 baseline from the first full-line sequence
-  propagation. The clue-type FLOOR is needed because maxB is otherwise bimodal
-  (it can't split the easy levels alone); `clueFeatures` reads the clue SET, not
-  the trace (a sum/dup counts even if cheap rules dissolve it to `b=1`).
+  (recorded on every trace step by `commit`; the `lineFeasibility` step counts
+  the **distinct value-COMBINATIONS** (multisets) that fill the line — NOT the
+  ordered cell-assignments: a person surveys "which sets of values fit", not
+  their permutations. Counting orderings inflated `b` ~3–10× — e.g. a dup line's
+  two equal values plus the distinct rest permute many ways for one combination —
+  and made forced lines look far harder than they are. All cheap/forced rules are
+  `b=1`; `sumBound` and `sequence` steps are `1+openCells` resp. `~half` of that —
+  sequences are easier). `puzzleProfile` → `{ maxB, bands, nFeas }` (band counts
+  of `#(b>3/5/8/12/20/30)`; `nFeas` = number of lineFeasibility steps). A level is
+  `puzzleLevel(profile, clueFeatures(clues)) = max(byMaxB, byWork, floorByClueType)`.
+  Because combination-counting bounds `maxB` at ~≤15, **maxB only separates the
+  EASY end** (`>6 ⇒ 3, >4 ⇒ 2`, the `>4` absorbing the ~4 sequence baseline). The
+  HARD end is driven by **how MANY lines need feasibility reasoning**: `byWork` =
+  `nFeas≥4 (or ≥4 steps with b>5) ⇒ 5, nFeas≥2 ⇒ 4` (per-level means ≈
+  L3:1 / L4:2.3 / L5:3.3 such lines — the single worst survey no longer
+  separates them). The clue-type FLOOR (`sum ⇒ ≥3, duplicate ⇒ ≥2`) gates the
+  easy end; `clueFeatures` reads the clue SET, not the trace (a sum/dup counts
+  even if cheap rules dissolve it to `b=1`).
 - **Two cheap rules keep `b` honest** (both in `logicalSolve` AND
   `solveWithTrace`, run BEFORE the feasibility DFS, mirror together): `dupPlacement`
   (adjacency-aware duplicate placement — the doubled value fits only in cells
@@ -94,8 +101,8 @@ Architectural points that are non-obvious from the code:
   **in-band** representative (`bestInBand`), with a closest-level `bestFallback`
   if none match. **Early-stop** once the best is stable (`MIN_SEARCH_MS` +
   `STALL_MS`); hard cap `DEFAULT_BUDGET_MS` (15 s). Per-level hit rates ≈
-  100/94/78/16/42 % (L4 leaks down to L3 — fine, the filter + ample yield handle
-  it). The shown puzzle displays its own level (computed from its trace, so it's
+  100/95/77/33/46 % (L4 is the weak spot — its config's feasibility-line count
+  spreads across L3–L5; the filter + ample yield handle the leak). The shown puzzle displays its own level (computed from its trace, so it's
   correct for code-loaded puzzles too).
 - **Grid generation injects sequences first.** Random fills almost never
   produce sequence lines, so the generator pre-fixes 0–3 lines (count from

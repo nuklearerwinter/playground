@@ -241,21 +241,32 @@ Radio-Group `name="level"`). Die Schwierigkeit wird **aus dem Trace gemessen**,
 nicht aus der Hinweiszahl.
 
 **`b` = Branching-Faktor pro Schritt.** Jeder Trace-Schritt trägt `b`: wie viele
-Kandidaten-Belegungen ein Mensch überblicken müsste, um den Schritt zu
-rechtfertigen. Die `lineFeasibility`-DFS zählt ihre Blätter; billige/erzwungene
+Kandidaten-*Belegungen* ein Mensch überblicken müsste, um den Schritt zu
+rechtfertigen. Der `lineFeasibility`-Schritt zählt die **distinkten
+Wert-KOMBINATIONEN (Multisets)**, die die Linie füllen — NICHT die geordneten
+Zell-Belegungen: ein Mensch überlegt „welche Zahlenmengen passen", nicht ihre
+Permutationen. Permutationen aufzuzählen blähte `b` ~3–10× auf (die zwei gleichen
+Werte einer Dup-Linie plus der distinkte Rest permutieren vielfach für *eine*
+Kombination) und ließ erzwungene Linien viel schwerer wirken. Billige/erzwungene
 Regeln sind `b=1`, `sumBound` ist `1+offene Zellen`, `sequence` ≈ die Hälfte
-davon (Sequenzen sind leichter). `puzzleProfile(trace)` → `{ maxB, bands }`
-(`maxB` = härtester Einzelschritt; `bands` = Zähler `#(b>3/5/8/12/20/30)`).
+davon (Sequenzen sind leichter). `puzzleProfile(trace)` → `{ maxB, bands, nFeas }`
+(`maxB` = härtester Einzelschritt; `bands` = Zähler `#(b>3/5/8/12/20/30)`;
+`nFeas` = Anzahl `lineFeasibility`-Schritte).
 
-**`puzzleLevel = max(StufeAusMaxB, StufeAusHinweistyp)`** — zwei Achsen, weil
-`maxB` allein das leichte Ende nicht trennt:
-- **`maxB`-Stufen** (hoch angesetzt, weil jede Sequenz-Linie über die erste
-  Voll-Linien-Propagation eine `maxB≈4`-Grundlinie liefert): `>40` (oder viele
-  `b>12`) ⇒ 5; `>16` ⇒ 4; `>8` ⇒ 3; `>4` ⇒ 2; sonst 1.
+**`puzzleLevel = max(StufeAusMaxB, StufeAusArbeit, StufeAusHinweistyp)`** — drei
+Achsen, weil keine einzelne alle fünf Stufen spannt. Durch die
+Kombinations-Zählung ist `maxB` auf ~≤15 gestaucht und trennt nur noch das
+**leichte Ende**; das **harte Ende** läuft über `nFeas` (wie viele Linien schwere
+Feasibility-Überlegung brauchen):
+- **`maxB`-Stufen** (nur 1–3): `>6` ⇒ 3; `>4` ⇒ 2 (das `>4` schluckt die
+  `maxB≈4`-Sequenz-Grundlinie); sonst 1.
+- **Arbeits-Stufen** (`nFeas`): `nFeas≥4` (oder ≥4 Schritte mit `b>5`) ⇒ 5;
+  `nFeas≥2` ⇒ 4. (Mittelwerte ≈ L3:1 / L4:2.3 / L5:3.3 solcher Linien — der
+  härteste Einzelschritt trennt L4/L5 nicht mehr.)
 - **Hinweistyp-Boden** (`clueFeatures` liest die *Clue-Menge*, nicht den Trace):
   Liniensumme vorhanden ⇒ ≥ Mittel; Duplikat vorhanden ⇒ ≥ Leicht.
-Trefferquoten ≈ 100/94/78/16/42 %; L4 ist konfigurationsbedingt niedrig (sehr
-breite `maxB`-Streuung der L4-Config).
+Trefferquoten ≈ 100/95/77/33/46 %; L4 bleibt der Schwachpunkt (seine Config
+streut die Feasibility-Linien-Zahl über L3–L5).
 
 `LEVELS` trägt pro Stufe eine Generier-`cfg` (`minTotalSum`, `maxTotalSum`,
 `minDupLines`, `maxDupLines`, `fewerPairSums`), die die Generierung **ins Band
