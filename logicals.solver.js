@@ -632,6 +632,43 @@ function workerCode() {
       }
     }
 
+    // Min/max sum of distinct values (one per domain in `doms`, none equal
+    // `forbidden`, all distinct) via DP over (cellIndex, usedMask). The
+    // distinctness-aware sum bound — strictly stronger than the per-cell min/max
+    // totalSum rule, and the cheap shortcut behind many feasibility eliminations.
+    function distinctSumRange(doms, forbidden) {
+      const n = doms.length, fb = forbidden ? 1 << (forbidden - 1) : 0;
+      const memo = new Map();
+      function go(i, used, wantMin) {
+        if (i === n) return 0;
+        const key = (i << 10) | (used << 1) | (wantMin ? 1 : 0);
+        if (memo.has(key)) return memo.get(key);
+        let best = wantMin ? Infinity : -Infinity;
+        for (let v = 1; v <= 9; v++) {
+          const b = 1 << (v - 1);
+          if (!(doms[i] & b) || (used & b) || (b & fb)) continue;
+          const sub = go(i + 1, used | b, wantMin);
+          if (sub === Infinity || sub === -Infinity) continue;
+          const tot = v + sub;
+          if (wantMin ? tot < best : tot > best) best = tot;
+        }
+        memo.set(key, best); return best;
+      }
+      return [go(0, 0, true), go(0, 0, false)];
+    }
+    function sumBound(cells, target) {
+      for (let k = 0; k < 6 && !bad; k++) {
+        const idx = cells[k];
+        if (POPCOUNT[domains[idx]] === 1) continue;
+        for (let v = 1; v <= 9; v++) {
+          if (!(domains[idx] & (1 << (v - 1)))) continue;
+          const others = []; for (let j = 0; j < 6; j++) if (j !== k) others.push(domains[cells[j]]);
+          const r = distinctSumRange(others, v), rest = target - v;
+          if (r[0] === Infinity || rest < r[0] || rest > r[1]) clearBit(idx, v);
+        }
+      }
+    }
+
     let guard = 0;
     while (progress && !bad && guard++ < 200) {
       progress = false;
@@ -727,6 +764,9 @@ function workerCode() {
 
       // Duplicate placement (adjacency-aware) — cheap; runs before the DFS.
       for (const ls of lineSearches) { if (ls.dupMask) dupPlacement(ls.cells, ls.dupMask); if (bad) break; }
+      if (bad) break;
+      // Distinctness-aware sum bound (non-dup totalSum lines) — cheap; pre-DFS.
+      for (const t of totals) { if (!t.dupMask) sumBound(t.cells, t.value); if (bad) break; }
       if (bad) break;
 
       // Line feasibility: for any row/column constrained by a totalSum or
@@ -1077,6 +1117,7 @@ const RULE_WEIGHT = {
   "global-hidden": 2,
   "global-dup-rows": 5, "global-dup-cols": 5,
   "dup-place": 2,
+  "sumBound": 2,
   "pairSum": 2,
   "totalSum": 2,
   "sequence": 3,
@@ -1287,6 +1328,30 @@ function solveWithTrace(clues) {
     }
   }
 
+  // Min and max sum of choosing DISTINCT values (one per cell-domain in `doms`,
+  // none equal `forbidden`, all distinct), via DP over (cellIndex, usedMask).
+  // [Infinity, -Infinity] if no distinct system of representatives exists.
+  function distinctSumRange(doms, forbidden) {
+    const n = doms.length, fb = forbidden ? bit(forbidden) : 0;
+    const memo = new Map();
+    function go(i, used, wantMin) {
+      if (i === n) return 0;
+      const key = (i << 10) | (used << 1) | (wantMin ? 1 : 0);
+      if (memo.has(key)) return memo.get(key);
+      let best = wantMin ? Infinity : -Infinity;
+      for (let v = 1; v <= 9; v++) {
+        const b = bit(v);
+        if (!(doms[i] & b) || (used & b) || (b & fb)) continue;
+        const sub = go(i + 1, used | b, wantMin);
+        if (sub === Infinity || sub === -Infinity) continue;
+        const tot = v + sub;
+        if (wantMin ? tot < best : tot > best) best = tot;
+      }
+      memo.set(key, best); return best;
+    }
+    return [go(0, 0, true), go(0, 0, false)];
+  }
+
   // Propagation bis zum Fixpunkt. Jede Regelanwendung, die mindestens einen
   // Kandidaten entfernt, ergibt EINEN Schritt (mit Begründung + entfernten Werten).
   let guard = 0;
@@ -1403,6 +1468,33 @@ function solveWithTrace(clues) {
         }
         if (bad) break;
       }
+    }
+    if (bad) break;
+    cascade(); if (bad) break;
+    // 5a2. Distinktheits-Summen-Schranke: für jede Summen-Linie OHNE Duplikat
+    //      streiche Wert v aus Zelle k, wenn mit k=v und sonst lauter
+    //      verschiedenen Werten die geforderte Summe nicht erreichbar ist (die
+    //      übrigen fünf verschiedenen Zellen ergäben dann zu wenig/zu viel).
+    //      Das ist das billige menschliche „extreme Summe"-Argument, das die
+    //      Feasibility-DFS sonst per Brute Force fände.
+    for (const t of totals) {
+      if (t.dupMask) continue; // dup lines: left to dup-place + feasibility
+      const cells = t.cells, lineLabel = t.scope === "row" ? rowLabel(t.index) : colLabel(t.index);
+      begin();
+      for (let k = 0; k < 6 && !bad; k++) {
+        const idx = cells[k];
+        if (isSingle(idx)) continue;
+        for (let v = 1; v <= 9; v++) {
+          if (!(domains[idx] & bit(v))) continue;
+          const others = []; for (let j = 0; j < 6; j++) if (j !== k) others.push(domains[cells[j]]);
+          const [mn, mx] = distinctSumRange(others, v);
+          const rest = t.value - v;
+          if (mn === Infinity || rest < mn || rest > mx) rmBit(idx, v);
+        }
+      }
+      commit("Bei lauter verschiedenen Zahlen lässt sich die Summe " + t.value + " in " + lineLabel + " mit diesen Werten nicht erreichen — die übrigen Zellen lägen außerhalb der möglichen Summe.", "sumBound",
+        { cells: cells.slice(), value: t.value, scope: t.scope, index: t.index });
+      if (bad) break;
     }
     if (bad) break;
     cascade(); if (bad) break;

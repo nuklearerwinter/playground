@@ -435,6 +435,8 @@ function clueHeadHtml(step) {
       return `<span class="chip sum"><b>${lab(cl.a)} + ${lab(cl.b)} = ${cl.value}</b></span>`;
     case "totalSum":
       return `<span class="chip sum"><b>Σ ${scopeLabel(cl)} = ${cl.value}</b></span>`;
+    case "sumBound":
+      return `<span class="chip sum"><b>Σ ${scopeLabel(cl)} = ${cl.value}</b> · Summenschranke</span>`;
     case "lineFeasibility": {
       // This rule fuses EVERY constraint on the line — name all that are active
       // (totalSum and/or the duplicate value), not just one, so the head isn't
