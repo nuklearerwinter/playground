@@ -1145,10 +1145,6 @@ function puzzleProfile(trace) {
   const prof = { maxB: 1, steps: (trace && trace.steps) ? trace.steps.length : 0, bands: {} };
   for (const t of B_BANDS) prof.bands[t] = 0;
   if (trace && trace.steps) for (const s of trace.steps) {
-    // Sequence steps carry a display `b` > 1 (ordering reasoning isn't trivial),
-    // but they appear in the easy levels too and aren't a "needs-paper" survey —
-    // so they DON'T count toward the classification maxB/bands.
-    if (s.ruleType === "sequence") continue;
     const b = s.b || 1;
     if (b > prof.maxB) prof.maxB = b;
     for (const t of B_BANDS) if (b > t) prof.bands[t]++;
@@ -1185,11 +1181,16 @@ function clueFeatures(clues) {
 // force the top level even below the maxB ceiling.
 function puzzleLevel(profile, feat) {
   const maxB = profile.maxB, veryHard = profile.bands[12] || 0;
-  if (maxB > 30 || veryHard > 2) return 5;
-  if (maxB > 10) return 4;
-  if (maxB > 4 || (feat && feat.hasSum)) return 3;
-  if (maxB > 1 || (feat && feat.dupCount >= 1)) return 2;
-  return 1;
+  // Level = max(tier-by-maxB, floor-by-clue-type). Sequences now contribute to
+  // maxB (≈4 baseline from the first full-line propagation), so the maxB tiers
+  // are shifted up to absorb that; clue types set a floor (sum ⇒ ≥3, dup ⇒ ≥2).
+  let byB = 1;
+  if (maxB > 40 || veryHard > 2) byB = 5;
+  else if (maxB > 16) byB = 4;
+  else if (maxB > 8) byB = 3;
+  else if (maxB > 4) byB = 2;
+  const byFeat = (feat && feat.hasSum) ? 3 : (feat && feat.dupCount >= 1) ? 2 : 1;
+  return Math.max(byB, byFeat);
 }
 
 // === Lösungsweg: Schritt-für-Schritt-Solver (Trace) ===
@@ -1626,11 +1627,10 @@ function solveWithTrace(clues) {
     // 6. Sequenzen
     for (const s of seqs) {
       const cells = s.cells;
-      // Reasoning along an ordered line is more than a forced single (b=1):
-      // weight by how many cells are still open. (Display only — sequence steps
-      // are excluded from the classification maxB in puzzleProfile, since they
-      // appear in the easy levels too and aren't a "needs-paper" survey.)
-      const seqB = 1 + cells.filter(idx => !isSingle(idx)).length;
+      // Reasoning along an ordered line is more than a forced single, but
+      // EASIER than a sumBound (the consecutive/monotone rule is intuitive), so
+      // its b is ~half of sumBound's (1 + openCells). Counts toward the level.
+      const seqB = Math.max(1, Math.round((1 + cells.filter(idx => !isSingle(idx)).length) / 2));
       begin();
       if (s.type === "directSequence") {
         for (let k = 0; k < cells.length - 1; k++) { keep(cells[k + 1], (domains[cells[k]] << 1) & FULL); keep(cells[k], domains[cells[k + 1]] >> 1); }
