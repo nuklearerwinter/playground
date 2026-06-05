@@ -1516,6 +1516,11 @@ function solveWithTrace(clues) {
     for (const t of totals) {
       if (t.dupMask) continue; // dup lines: left to dup-place + feasibility
       const cells = t.cells, lineLabel = t.scope === "row" ? rowLabel(t.index) : colLabel(t.index);
+      // This rule is harder for a human than a plain min/max sum (b=1): one must
+      // reason about the distinct-sum range of the still-open cells. Weight it by
+      // how many cells are still open (more unknowns to juggle = harder).
+      const openCount = cells.filter(idx => !isSingle(idx)).length;
+      const sumBoundB = 1 + openCount; // 3–7 in practice; stays ≤10 ⇒ level ≤ Mittel
       begin();
       let ex = null; // first struck (cell,value) + its bound, for a concrete reason
       for (let k = 0; k < 6 && !bad; k++) {
@@ -1545,7 +1550,7 @@ function solveWithTrace(clues) {
         else
           reason = head + "müssten die übrigen fünf zusammen " + ex.rest + " ergeben — als fünf verschiedene Zahlen sind aber höchstens " + ex.mx + " möglich. Solche Werte fallen weg.";
       }
-      commit(reason, "sumBound", { cells: cells.slice(), value: t.value, scope: t.scope, index: t.index });
+      commit(reason, "sumBound", { cells: cells.slice(), value: t.value, scope: t.scope, index: t.index }, sumBoundB);
       if (bad) break;
     }
     if (bad) break;
