@@ -249,24 +249,27 @@ Permutationen. Permutationen aufzuzählen blähte `b` ~3–10× auf (die zwei gl
 Werte einer Dup-Linie plus der distinkte Rest permutieren vielfach für *eine*
 Kombination) und ließ erzwungene Linien viel schwerer wirken. Billige/erzwungene
 Regeln sind `b=1`, `sumBound` ist `1+offene Zellen`, `sequence` ≈ die Hälfte
-davon (Sequenzen sind leichter). `puzzleProfile(trace)` → `{ maxB, bands, nFeas }`
-(`maxB` = härtester Einzelschritt; `bands` = Zähler `#(b>3/5/8/12/20/30)`;
-`nFeas` = Anzahl `lineFeasibility`-Schritte).
+davon (Sequenzen sind leichter). `puzzleProfile(trace)` →
+`{ maxB, bands, nFeas, nFeasHard }` (`maxB` = härtester Einzelschritt; `bands` =
+Zähler `#(b>3/5/8/12/20/30)`; `nFeas` = alle `lineFeasibility`-Schritte;
+`nFeasHard` = jene mit `b≥3`).
 
 **`puzzleLevel = max(StufeAusMaxB, StufeAusArbeit, StufeAusHinweistyp)`** — drei
 Achsen, weil keine einzelne alle fünf Stufen spannt. Durch die
 Kombinations-Zählung ist `maxB` auf ~≤15 gestaucht und trennt nur noch das
-**leichte Ende**; das **harte Ende** läuft über `nFeas` (wie viele Linien schwere
-Feasibility-Überlegung brauchen):
-- **`maxB`-Stufen** (nur 1–3): `>6` ⇒ 3; `>4` ⇒ 2 (das `>4` schluckt die
-  `maxB≈4`-Sequenz-Grundlinie); sonst 1.
-- **Arbeits-Stufen** (`nFeas`): `nFeas≥4` (oder ≥4 Schritte mit `b>5`) ⇒ 5;
-  `nFeas≥2` ⇒ 4. (Mittelwerte ≈ L3:1 / L4:2.3 / L5:3.3 solcher Linien — der
-  härteste Einzelschritt trennt L4/L5 nicht mehr.)
+**leichte Ende**; das **harte Ende** läuft über `nFeasHard` (wie viele Linien
+einen *echten* ≥3-Kombinationen-Survey erzwangen):
+- **`maxB`-Stufen**: `>6` ⇒ 3; `>4` ⇒ 2 (schluckt die `maxB≈4`-Sequenz-Grundlinie);
+  plus Sicherung für einen einzelnen Monster-Survey `>9` ⇒ 4, `>14` ⇒ 5.
+- **Arbeits-Stufen** (`nFeasHard`): `≥1` ⇒ Schwer; `≥2` ⇒ Sehr schwer.
+  **Feasibility-Schritte mit `b≤2` zählen NICHT** — sie sind faktisch erzwungen.
+  Deshalb ist ein Rätsel mit vielen Sum/Dup-Linien, aber fast nur erzwungenen
+  Deduktionen (Fixture `0WH0` = maxB 7 / nFeas 8 / nFeasHard 1) **Schwer, nicht
+  Sehr schwer** — seine 8 Linien lösen sich überwiegend bei b≤2.
 - **Hinweistyp-Boden** (`clueFeatures` liest die *Clue-Menge*, nicht den Trace):
   Liniensumme vorhanden ⇒ ≥ Mittel; Duplikat vorhanden ⇒ ≥ Leicht.
-Trefferquoten ≈ 100/95/77/33/46 %; L4 bleibt der Schwachpunkt (seine Config
-streut die Feasibility-Linien-Zahl über L3–L5).
+Trefferquoten ≈ 100/97/74/28/34 %; L4 bleibt der Schwachpunkt (seine Config
+streut die Hard-Survey-Zahl über L3–L5).
 
 `LEVELS` trägt pro Stufe eine Generier-`cfg` (`minTotalSum`, `maxTotalSum`,
 `minDupLines`, `maxDupLines`, `fewerPairSums`), die die Generierung **ins Band

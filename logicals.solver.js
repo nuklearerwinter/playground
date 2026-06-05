@@ -1142,16 +1142,20 @@ function puzzleDifficulty(trace, clueCount) {
 // caps on these band counts (set empirically from the measured distribution).
 const B_BANDS = [3, 5, 8, 12, 20, 30];
 function puzzleProfile(trace) {
-  const prof = { maxB: 1, steps: (trace && trace.steps) ? trace.steps.length : 0, bands: {}, nFeas: 0 };
+  const prof = { maxB: 1, steps: (trace && trace.steps) ? trace.steps.length : 0, bands: {}, nFeas: 0, nFeasHard: 0 };
   for (const t of B_BANDS) prof.bands[t] = 0;
   if (trace && trace.steps) for (const s of trace.steps) {
     const b = s.b || 1;
     if (b > prof.maxB) prof.maxB = b;
     for (const t of B_BANDS) if (b > t) prof.bands[t]++;
-    // nFeas = how many lines needed the heavy feasibility enumeration. Since B is
-    // now combination-counted (bounded ~≤15), this COUNT — not the single worst
-    // survey — is what separates the hard levels (L3≈1, L4≈2, L5≈3 such lines).
-    if (s.ruleType === "lineFeasibility") prof.nFeas++;
+    // Feasibility lines split by whether they took real WORK. Since B is now
+    // combination-counted (bounded ~≤15), the single worst survey (maxB) barely
+    // separates the hard levels; what does is how many lines forced a genuine
+    // multi-combination survey. nFeasHard counts feasibility steps with b≥3 (a
+    // real "which of ≥3 value-sets fits?" decision); b≤2 feasibility steps are
+    // essentially forced and don't make a puzzle hard (per-level nFeasHard means
+    // ≈ L3:0.4 / L4:0.6 / L5:1.3). nFeas (all feasibility steps) is kept for info.
+    if (s.ruleType === "lineFeasibility") { prof.nFeas++; if (b >= 3) prof.nFeasHard++; }
   }
   return prof;
 }
@@ -1159,11 +1163,12 @@ function puzzleProfile(trace) {
 // Five difficulty levels. Classification takes the MAX of three axes, because no
 // single axis spans all five. Since B is combination-counted (bounded ~≤15), the
 // single hardest survey (maxB) only separates the EASY end (1–3); the HARD end
-// (4–5) is driven by how MANY lines need feasibility reasoning (nFeas). Clue
-// TYPES set a floor for the easy end (a duplicate to track ⇒ ≥"Leicht"; a
-// line-sum to reason about ⇒ ≥"Mittel"). `cfg` biases generation toward the band
-// (clue-type mix + the per-level maxTotalSum/duplicate counts); the actual gate
-// is puzzleLevel() on the solved trace + clue features.
+// (4–5) is driven by how many lines forced a genuine multi-combination survey
+// (nFeasHard = feasibility steps with b≥3). Clue TYPES set a floor for the easy
+// end (a duplicate to track ⇒ ≥"Leicht"; a line-sum to reason about ⇒ ≥"Mittel").
+// `cfg` biases generation toward the band (clue-type mix + the per-level
+// maxTotalSum/duplicate counts); the actual gate is puzzleLevel() on the solved
+// trace + clue features.
 const LEVELS = [
   { id: 1, name: "Sehr leicht", cfg: { minTotalSum: 0, maxTotalSum: 0, minDupLines: 0, maxDupLines: 0, fewerPairSums: false } },
   { id: 2, name: "Leicht",      cfg: { minTotalSum: 0, maxTotalSum: 0, minDupLines: 1, maxDupLines: 1, fewerPairSums: false } },
@@ -1181,18 +1186,19 @@ function clueFeatures(clues) {
   }
   return { hasSum, dupCount };
 }
-// Difficulty level (1–5) = max of three axes. (1) maxB: with combination-counting
-// it tops out ~15 and only separates 1–3 (sequences give a ~4 baseline, so >4⇒2,
-// >6⇒3). (2) nFeas + mid-band count: how many lines need heavy feasibility
-// reasoning — the real hard-end signal (≥2 lines ⇒ Schwer, ≥4 lines or ≥4 steps
-// with b>5 ⇒ Sehr schwer). (3) clue-type floor (sum ⇒ ≥3, dup ⇒ ≥2). Thresholds
-// calibrated empirically; hit rates ≈ 100/93/76/55/57 %.
+// Difficulty level (1–5) = max of three axes. (1) maxB (single hardest survey):
+// with combination-counting it tops out ~15; mostly separates 1–3 (sequences give
+// a ~4 baseline, so >4⇒2, >6⇒3), with a high-end safety net for the rare lone
+// monster survey (>9⇒4, >14⇒5). (2) WORK = nFeasHard, how many lines forced a
+// genuine ≥3-combination survey: ≥1 ⇒ Schwer, ≥2 ⇒ Sehr schwer (b≤2 feasibility
+// steps are essentially forced and don't count). (3) clue-type floor (sum ⇒ ≥3,
+// dup ⇒ ≥2). Calibrated empirically; hit rates ≈ 100/93/66/32/39 %.
 function puzzleLevel(profile, feat) {
-  const maxB = profile.maxB, nFeas = profile.nFeas || 0, mid = profile.bands[5] || 0;
+  const maxB = profile.maxB, hard = profile.nFeasHard || 0;
   let byB = 1;
-  if (maxB > 6) byB = 3; else if (maxB > 4) byB = 2;
+  if (maxB > 14) byB = 5; else if (maxB > 9) byB = 4; else if (maxB > 6) byB = 3; else if (maxB > 4) byB = 2;
   let byWork = 1;
-  if (nFeas >= 4 || mid >= 4) byWork = 5; else if (nFeas >= 2) byWork = 4;
+  if (hard >= 2) byWork = 5; else if (hard >= 1) byWork = 4;
   const byFeat = (feat && feat.hasSum) ? 3 : (feat && feat.dupCount >= 1) ? 2 : 1;
   return Math.max(byB, byWork, byFeat);
 }

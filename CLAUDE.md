@@ -64,17 +64,22 @@ Architectural points that are non-obvious from the code:
   two equal values plus the distinct rest permute many ways for one combination —
   and made forced lines look far harder than they are. All cheap/forced rules are
   `b=1`; `sumBound` and `sequence` steps are `1+openCells` resp. `~half` of that —
-  sequences are easier). `puzzleProfile` → `{ maxB, bands, nFeas }` (band counts
-  of `#(b>3/5/8/12/20/30)`; `nFeas` = number of lineFeasibility steps). A level is
-  `puzzleLevel(profile, clueFeatures(clues)) = max(byMaxB, byWork, floorByClueType)`.
-  Because combination-counting bounds `maxB` at ~≤15, **maxB only separates the
-  EASY end** (`>6 ⇒ 3, >4 ⇒ 2`, the `>4` absorbing the ~4 sequence baseline). The
-  HARD end is driven by **how MANY lines need feasibility reasoning**: `byWork` =
-  `nFeas≥4 (or ≥4 steps with b>5) ⇒ 5, nFeas≥2 ⇒ 4` (per-level means ≈
-  L3:1 / L4:2.3 / L5:3.3 such lines — the single worst survey no longer
-  separates them). The clue-type FLOOR (`sum ⇒ ≥3, duplicate ⇒ ≥2`) gates the
-  easy end; `clueFeatures` reads the clue SET, not the trace (a sum/dup counts
-  even if cheap rules dissolve it to `b=1`).
+  sequences are easier). `puzzleProfile` → `{ maxB, bands, nFeas, nFeasHard }`
+  (band counts of `#(b>3/5/8/12/20/30)`; `nFeas` = all lineFeasibility steps,
+  `nFeasHard` = those with `b≥3`). A level is `puzzleLevel(profile,
+  clueFeatures(clues)) = max(byMaxB, byWork, floorByClueType)`:
+  - **byMaxB** (single hardest survey): combination-counting bounds `maxB` ~≤15, so
+    it mostly gates the EASY end (`>6 ⇒ 3, >4 ⇒ 2`, the `>4` absorbing the ~4
+    sequence baseline), with a high-end safety net for a lone monster survey
+    (`>9 ⇒ 4, >14 ⇒ 5`).
+  - **byWork** = `nFeasHard`, how many lines forced a genuine ≥3-combination survey
+    — the real hard-end signal: `≥1 ⇒ Schwer, ≥2 ⇒ Sehr schwer`. **`b≤2` feasibility
+    steps are essentially forced and DON'T count** (this is why a puzzle with many
+    sum/dup lines but only forced deductions, e.g. fixture `0WH0` = maxB 7 / nFeas 8
+    / nFeasHard 1, is Schwer not Sehr schwer — its 8 lines mostly resolve at b≤2).
+  - **clue-type FLOOR** (`sum ⇒ ≥3, duplicate ⇒ ≥2`) gates the easy end;
+    `clueFeatures` reads the clue SET, not the trace (a sum/dup counts even if
+    cheap rules dissolve it to `b=1`).
 - **Two cheap rules keep `b` honest** (both in `logicalSolve` AND
   `solveWithTrace`, run BEFORE the feasibility DFS, mirror together): `dupPlacement`
   (adjacency-aware duplicate placement — the doubled value fits only in cells
@@ -101,8 +106,8 @@ Architectural points that are non-obvious from the code:
   **in-band** representative (`bestInBand`), with a closest-level `bestFallback`
   if none match. **Early-stop** once the best is stable (`MIN_SEARCH_MS` +
   `STALL_MS`); hard cap `DEFAULT_BUDGET_MS` (15 s). Per-level hit rates ≈
-  100/95/77/33/46 % (L4 is the weak spot — its config's feasibility-line count
-  spreads across L3–L5; the filter + ample yield handle the leak). The shown puzzle displays its own level (computed from its trace, so it's
+  100/97/74/28/34 % (L4 is the weak spot — its config's hard-survey count spreads
+  across L3–L5; the filter + ample yield handle the leak). The shown puzzle displays its own level (computed from its trace, so it's
   correct for code-loaded puzzles too).
 - **Grid generation injects sequences first.** Random fills almost never
   produce sequence lines, so the generator pre-fixes 0–3 lines (count from
