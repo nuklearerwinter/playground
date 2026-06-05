@@ -1422,6 +1422,23 @@ function solveWithTrace(clues) {
     }
     return [go(0, 0, true), go(0, 0, false)];
   }
+  // Witness for distinctSumRange: the actual distinct assignment of `cellIdxs`
+  // (one value each, all different, none = `forbidden`) achieving the min (or
+  // max) total — so the sumBound reason can NAME why the bound is what it is
+  // ("kleinste freie Belegung: D1=3, D2=4, …"), instead of an unexplained number
+  // a tester reads as the generic 1+2+3+4+5. Brute over ≤6 cells; returns
+  // [{idx,v}] or null.
+  function distinctSumWitness(cellIdxs, forbidden, wantMin) {
+    const n = cellIdxs.length, fb = forbidden ? bit(forbidden) : 0;
+    let best = wantMin ? Infinity : -Infinity, bestPick = null;
+    const pick = new Array(n);
+    (function go(i, used, sum) {
+      if (i === n) { if (wantMin ? sum < best : sum > best) { best = sum; bestPick = pick.slice(); } return; }
+      const d = domains[cellIdxs[i]];
+      for (let v = 1; v <= 9; v++) { const b = bit(v); if (!(d & b) || (used & b) || (b & fb)) continue; pick[i] = v; go(i + 1, used | b, sum + v); }
+    })(0, 0, 0);
+    return bestPick ? cellIdxs.map((idx, i) => ({ idx, v: bestPick[i] })) : null;
+  }
 
   // Naked pair: two cells of a line whose candidate sets are the SAME 2-set
   // {a,b} must take a and b between them, so a and b are used up in this line —
@@ -1598,7 +1615,13 @@ function solveWithTrace(clues) {
           const [mn, mx] = distinctSumRange(others, v);
           const rest = t.value - v;
           if (mn === Infinity || rest < mn || rest > mx) {
-            if (!ex) ex = { label: cl2(idx), v, rest, mn, mx };
+            if (!ex) {
+              // Capture the witness NOW (same domain state + forbidden v as the
+              // bound), since later strikes in this same step shrink other cells.
+              const otherIdx = []; for (let j = 0; j < 6; j++) if (j !== k) otherIdx.push(cells[j]);
+              const witness = (mn === Infinity) ? null : distinctSumWitness(otherIdx, v, rest < mn);
+              ex = { label: cl2(idx), v, rest, mn, mx, witness };
+            }
             rmBit(idx, v);
           }
         }
@@ -1609,12 +1632,14 @@ function solveWithTrace(clues) {
       let reason = "Summe " + lineLabel + " = " + t.value + ".";
       if (ex) {
         const head = "In " + lineLabel + " sind alle sechs Zahlen verschieden und ergeben " + t.value + ". Mit " + ex.label + "=" + ex.v + " ";
+        const witnessTxt = (label, total) =>
+          ex.witness ? " (" + label + ": " + ex.witness.map(p => cl2(p.idx) + "=" + p.v).join(", ") + " = " + total + ")" : "";
         if (ex.mn === Infinity)
           reason = head + "blieben für die übrigen fünf keine fünf verschiedenen Werte übrig. Solche Werte fallen weg.";
         else if (ex.rest < ex.mn)
-          reason = head + "müssten die übrigen fünf zusammen " + ex.rest + " ergeben — als fünf verschiedene Zahlen sind aber mindestens " + ex.mn + " nötig. Solche Werte fallen weg.";
+          reason = head + "müssten die übrigen fünf zusammen " + ex.rest + " ergeben — die kleinsten dort noch möglichen verschiedenen Werte ergeben aber schon " + ex.mn + witnessTxt("kleinstmöglich", ex.mn) + ". Solche Werte fallen weg.";
         else
-          reason = head + "müssten die übrigen fünf zusammen " + ex.rest + " ergeben — als fünf verschiedene Zahlen sind aber höchstens " + ex.mx + " möglich. Solche Werte fallen weg.";
+          reason = head + "müssten die übrigen fünf zusammen " + ex.rest + " ergeben — die größten dort noch möglichen verschiedenen Werte ergeben aber höchstens " + ex.mx + witnessTxt("größtmöglich", ex.mx) + ". Solche Werte fallen weg.";
       }
       commit(reason, "sumBound", { cells: cells.slice(), value: t.value, scope: t.scope, index: t.index }, sumBoundB);
       if (bad) break;
