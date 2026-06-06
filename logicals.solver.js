@@ -1741,16 +1741,61 @@ function solveWithTrace(clues) {
       // its b is ~half of sumBound's (1 + openCells). Counts toward the level.
       const seqB = Math.max(1, Math.round((1 + cells.filter(idx => !isSingle(idx)).length) / 2));
       begin();
+      // Reason follows the sumBound pattern: ONE worked example (the first
+      // strike, naming the neighbour cell that makes the value impossible),
+      // plus a tail when the same chain check strikes further candidates.
+      // seqKeep = keep + capture that example; the kept masks are identical,
+      // so the fixpoint (and the logicalSolve mirror) is untouched.
+      let ex = null, nStruck = 0;
+      const seqKeep = (idx, mask, explain) => {
+        const removed = domains[idx] & ~mask;
+        for (let v = 1; v <= 9; v++) if (removed & bit(v)) { nStruck++; if (!ex) ex = explain(v); }
+        keep(idx, mask);
+      };
+      // For the gapless types: cell `idx`=v forces neighbour `nbr` to `need` —
+      // which is either gone from nbr's candidates or outside 1–9 entirely.
+      const directEx = (idx, v, nbr, need) => "Mit " + cl2(idx) + "=" + v + " müsste " + cl2(nbr) + "=" + need + " sein — " +
+        (need >= 1 && need <= 9 ? "das ist dort nicht mehr möglich" : "diesen Wert gibt es nicht");
       if (s.type === "directSequence") {
-        for (let k = 0; k < cells.length - 1; k++) { keep(cells[k + 1], (domains[cells[k]] << 1) & FULL); keep(cells[k], domains[cells[k + 1]] >> 1); }
+        for (let k = 0; k < cells.length - 1; k++) {
+          const L = cells[k], R = cells[k + 1];
+          seqKeep(R, (domains[L] << 1) & FULL, v => directEx(R, v, L, v - 1));
+          seqKeep(L, domains[R] >> 1, v => directEx(L, v, R, v + 1));
+        }
       } else if (s.type === "directDescending") {
-        for (let k = 0; k < cells.length - 1; k++) { keep(cells[k + 1], domains[cells[k]] >> 1); keep(cells[k], (domains[cells[k + 1]] << 1) & FULL); }
+        for (let k = 0; k < cells.length - 1; k++) {
+          const L = cells[k], R = cells[k + 1];
+          seqKeep(R, domains[L] >> 1, v => directEx(R, v, L, v + 1));
+          seqKeep(L, (domains[R] << 1) & FULL, v => directEx(L, v, R, v - 1));
+        }
       } else if (s.type === "ascending") {
-        for (let k = 0; k < cells.length - 1; k++) { const mn = minV(domains[cells[k]]); let m1 = 0; for (let v = mn + 1; v <= 9; v++) m1 |= bit(v); keep(cells[k + 1], m1); const mx = maxV(domains[cells[k + 1]]); let m2 = 0; for (let v = 1; v <= mx - 1; v++) m2 |= bit(v); keep(cells[k], m2); }
+        for (let k = 0; k < cells.length - 1; k++) {
+          const L = cells[k], R = cells[k + 1];
+          const mn = minV(domains[L]); let m1 = 0; for (let v = mn + 1; v <= 9; v++) m1 |= bit(v);
+          seqKeep(R, m1, v => cl2(R) + " muss größer als " + cl2(L) + " sein, und " + cl2(L) + " ist mindestens " + mn + " — die " + v + " ist zu klein");
+          const mx = maxV(domains[R]); let m2 = 0; for (let v = 1; v <= mx - 1; v++) m2 |= bit(v);
+          seqKeep(L, m2, v => cl2(L) + " muss kleiner als " + cl2(R) + " sein, und " + cl2(R) + " ist höchstens " + mx + " — die " + v + " ist zu groß");
+        }
       } else { // descending (with gaps)
-        for (let k = 0; k < cells.length - 1; k++) { const mx = maxV(domains[cells[k]]); let m1 = 0; for (let v = 1; v <= mx - 1; v++) m1 |= bit(v); keep(cells[k + 1], m1); const mn = minV(domains[cells[k + 1]]); let m2 = 0; for (let v = mn + 1; v <= 9; v++) m2 |= bit(v); keep(cells[k], m2); }
+        for (let k = 0; k < cells.length - 1; k++) {
+          const L = cells[k], R = cells[k + 1];
+          const mx = maxV(domains[L]); let m1 = 0; for (let v = 1; v <= mx - 1; v++) m1 |= bit(v);
+          seqKeep(R, m1, v => cl2(R) + " muss kleiner als " + cl2(L) + " sein, und " + cl2(L) + " ist höchstens " + mx + " — die " + v + " ist zu groß");
+          const mn = minV(domains[R]); let m2 = 0; for (let v = mn + 1; v <= 9; v++) m2 |= bit(v);
+          seqKeep(L, m2, v => cl2(L) + " muss größer als " + cl2(R) + " sein, und " + cl2(R) + " ist mindestens " + mn + " — die " + v + " ist zu klein");
+        }
       }
-      commit("Diese Werte passen nicht mehr in die geforderte Reihenfolge.", "sequence",
+      let reason = "Diese Werte passen nicht mehr in die geforderte Reihenfolge.";
+      if (ex) {
+        const lineLabel = s.scope === "row" ? rowLabel(s.index) : colLabel(s.index);
+        const seqDesc = s.type === "directSequence" ? "steigt lückenlos um je 1"
+          : s.type === "directDescending" ? "fällt lückenlos um je 1"
+          : s.type === "ascending" ? "steigt von Zelle zu Zelle (Lücken erlaubt)"
+          : "fällt von Zelle zu Zelle (Lücken erlaubt)";
+        reason = lineLabel + " " + seqDesc + ". " + ex +
+          (nStruck > 1 ? ". Dieselbe Prüfung entlang der Kette streicht auch die übrigen unten markierten Kandidaten." : ".");
+      }
+      commit(reason, "sequence",
         { cells: s.cells.slice(), kind: s.type, scope: s.scope, index: s.index }, seqB);
       if (bad) break;
     }
