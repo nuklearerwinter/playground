@@ -1182,8 +1182,9 @@ function puzzleProfile(trace) {
 
 // Five difficulty levels. Classification takes the MAX of three axes, because no
 // single axis spans all five. Since B is combination-counted (bounded ~≤15), the
-// single hardest survey (maxB) only separates the EASY end (1–3); the HARD end
-// (4–5) is driven by how many lines forced a genuine multi-combination survey
+// single hardest survey (maxB) separates the easy end and caps Mittel at B=6
+// (any 7+-combination survey ⇒ Schwer); the HARD end (4–5) is otherwise driven
+// by how many lines forced a genuine multi-combination survey
 // (nFeasHard = feasibility steps with b≥3). Clue TYPES set a floor for the easy
 // end (a duplicate to track ⇒ ≥"Leicht"; a line-sum to reason about ⇒ ≥"Mittel").
 // `cfg` biases generation toward the band (clue-type mix + the per-level
@@ -1207,16 +1208,18 @@ function clueFeatures(clues) {
   return { hasSum, dupCount };
 }
 // Difficulty level (1–5) = max of three axes. (1) maxB (single hardest survey):
-// with combination-counting it tops out ~15; mostly separates 1–3 (sequences give
-// a ~4 baseline, so >4⇒2, >6⇒3), with a high-end safety net for the rare lone
-// monster survey (>9⇒4, >14⇒5). (2) WORK = nFeasHard, how many lines forced a
+// with combination-counting it tops out ~15; separates the easy end (sequences
+// give a ~4 baseline, so >4⇒2; Mittel ends at 6) and pushes any survey of 7+
+// combinations straight to Schwer (>6⇒4, >14⇒5 — Mittel itself is reached via
+// the sum-clue floor, axis 3). (2) WORK = nFeasHard, how many lines forced a
 // genuine ≥3-combination survey: ≥1 ⇒ Schwer, ≥2 ⇒ Sehr schwer (b≤2 feasibility
 // steps are essentially forced and don't count). (3) clue-type floor (sum ⇒ ≥3,
-// dup ⇒ ≥2). Calibrated empirically; hit rates ≈ 100/93/66/32/39 %.
+// dup ⇒ ≥2). Calibrated empirically; hit rates ≈ 100/92/39/59/41 % (L3 is the
+// weak spot since Schwer absorbed the maxB 7–9 band; yield + filter cover it).
 function puzzleLevel(profile, feat) {
   const maxB = profile.maxB, hard = profile.nFeasHard || 0;
   let byB = 1;
-  if (maxB > 14) byB = 5; else if (maxB > 9) byB = 4; else if (maxB > 6) byB = 3; else if (maxB > 4) byB = 2;
+  if (maxB > 14) byB = 5; else if (maxB > 6) byB = 4; else if (maxB > 4) byB = 2;
   let byWork = 1;
   if (hard >= 2) byWork = 5; else if (hard >= 1) byWork = 4;
   const byFeat = (feat && feat.hasSum) ? 3 : (feat && feat.dupCount >= 1) ? 2 : 1;

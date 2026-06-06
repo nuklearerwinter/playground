@@ -69,9 +69,10 @@ Architectural points that are non-obvious from the code:
   `nFeasHard` = those with `b≥3`). A level is `puzzleLevel(profile,
   clueFeatures(clues)) = max(byMaxB, byWork, floorByClueType)`:
   - **byMaxB** (single hardest survey): combination-counting bounds `maxB` ~≤15, so
-    it mostly gates the EASY end (`>6 ⇒ 3, >4 ⇒ 2`, the `>4` absorbing the ~4
-    sequence baseline), with a high-end safety net for a lone monster survey
-    (`>9 ⇒ 4, >14 ⇒ 5`).
+    it gates the EASY end (`>4 ⇒ 2`, absorbing the ~4 sequence baseline) and caps
+    Mittel at `maxB=6`: any 7+-combination survey jumps straight to Schwer
+    (`>6 ⇒ 4, >14 ⇒ 5`; there is no byMaxB ⇒ 3 — Mittel is reached via the
+    sum-clue floor).
   - **byWork** = `nFeasHard`, how many lines forced a genuine ≥3-combination survey
     — the real hard-end signal: `≥1 ⇒ Schwer, ≥2 ⇒ Sehr schwer`. **`b≤2` feasibility
     steps are essentially forced and DON'T count** (this is why a puzzle with many
@@ -113,8 +114,9 @@ Architectural points that are non-obvious from the code:
   **in-band** representative (`bestInBand`), with a closest-level `bestFallback`
   if none match. **Early-stop** once the best is stable (`MIN_SEARCH_MS` +
   `STALL_MS`); hard cap `DEFAULT_BUDGET_MS` (15 s). Per-level hit rates ≈
-  100/97/74/28/34 % (L4 is the weak spot — its config's hard-survey count spreads
-  across L3–L5; the filter + ample yield handle the leak). The shown puzzle displays its own level (computed from its trace, so it's
+  100/92/39/59/41 % (L3 is the weak spot — since Schwer starts at `maxB>6`,
+  many of its config's puzzles classify as Schwer; the filter + ample yield
+  handle the leak). The shown puzzle displays its own level (computed from its trace, so it's
   correct for code-loaded puzzles too).
 - **Grid generation injects sequences first.** Random fills almost never
   produce sequence lines, so the generator pre-fixes 0–3 lines (count from
