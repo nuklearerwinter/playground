@@ -21,7 +21,7 @@ load time, so `logicals.solver.js` must load first.
 This is the only non-trivial file. Before editing it, read
 [LOGICALS_ALGORITHM.md](LOGICALS_ALGORITHM.md) — it covers the puzzle rules,
 the propagation-only `logicalSolve` acceptance gate, clue selection, and the
-trace-based 5-level difficulty system (per-step branching factor `b`).
+trace-based 6-level difficulty system (per-step branching factor `b`).
 
 Architectural points that are non-obvious from the code:
 
@@ -53,9 +53,9 @@ Architectural points that are non-obvious from the code:
   totalSum before pairSum). That removes totalSum hints almost entirely and
   yields ~11–20 clues depending on luck. The `targetClues > 0` rebalance path
   still exists but is unused by the app.
-- **Difficulty = 5 levels, classified from the solve trace (no sliders).** The
+- **Difficulty = 6 levels, classified from the solve trace (no sliders).** The
   old per-knob settings panel is gone; the UI is one radio group (`name="level"`,
-  1–5). The real difficulty signal is **`b`, the per-step branching factor** —
+  1–6): Sehr leicht / Leicht / Mittel / Schwer / Sehr schwer / Extrem. The real difficulty signal is **`b`, the per-step branching factor** —
   how many candidate configurations a human must survey to justify a step
   (recorded on every trace step by `commit`; the `lineFeasibility` step counts
   the **distinct value-COMBINATIONS** (multisets) that fill the line — NOT the
@@ -68,13 +68,21 @@ Architectural points that are non-obvious from the code:
   (band counts of `#(b>3/5/8/12/20/30)`; `nFeas` = all lineFeasibility steps,
   `nFeasHard` = those with `b≥3`). A level is `puzzleLevel(profile,
   clueFeatures(clues)) = max(byMaxB, byWork, floorByClueType)`:
-  - **byMaxB** (single hardest survey): combination-counting bounds `maxB` ~≤15, so
-    it gates the EASY end (`>4 ⇒ 2`, absorbing the ~4 sequence baseline) and caps
-    Mittel at `maxB=6`: any 7+-combination survey jumps straight to Schwer
-    (`>6 ⇒ 4, >14 ⇒ 5`; there is no byMaxB ⇒ 3 — Mittel is reached via the
-    sum-clue floor).
+  - **byMaxB** (single hardest survey): on plain lines `maxB` is small, but a
+    sum-constrained line's combination survey can reach the tens (observed up to
+    ~70). It gates the EASY end (`>4 ⇒ 2`, absorbing the ~4 sequence baseline),
+    caps Mittel at `maxB=6` (any 7+-combination survey jumps straight to Schwer),
+    AND drives the whole hard end: `>6 ⇒ 4 (Schwer), >14 ⇒ 5 (Sehr schwer),
+    >25 ⇒ 6 (Extrem)`. There is no byMaxB ⇒ 3 — Mittel is reached via the sum-clue
+    floor. **The `>25` cut is what split off Extrem**: the old single top band lumped
+    `maxB` 15→70 into one "Sehr schwer" (a 4.6× range that testers found extreme),
+    so the genuine single-giant-survey outliers now get their own level (~50/50
+    split of the old L5 lands at ~`maxB=25`).
   - **byWork** = `nFeasHard`, how many lines forced a genuine ≥3-combination survey
-    — the real hard-end signal: `≥1 ⇒ Schwer, ≥2 ⇒ Sehr schwer`. **`b≤2` feasibility
+    — a secondary hard-end signal: `≥1 ⇒ Schwer, ≥2 ⇒ Sehr schwer`. **It caps at 5
+    (Sehr schwer) — Extrem is maxB-only**, by design: a "many surveys, none giant"
+    puzzle is Sehr schwer, not Extrem (the chosen anchor for Extrem is the single
+    hardest survey, not their count). **`b≤2` feasibility
     steps are essentially forced and DON'T count** (this is why a puzzle with many
     sum/dup lines but only forced deductions, e.g. fixture `0WH0` = maxB 7 / nFeas 8
     / nFeasHard 1, is Schwer not Sehr schwer — its 8 lines mostly resolve at b≤2).
@@ -113,11 +121,13 @@ Architectural points that are non-obvious from the code:
   `solveWithTrace`s each, classifies by level, and keeps the fewest-clue
   **in-band** representative (`bestInBand`), with a closest-level `bestFallback`
   if none match. **Early-stop** once the best is stable (`MIN_SEARCH_MS` +
-  `STALL_MS`); hard cap `DEFAULT_BUDGET_MS` (15 s). Per-level hit rates ≈
-  100/92/39/59/41 % (L3 is the weak spot — since Schwer starts at `maxB>6`,
-  many of its config's puzzles classify as Schwer; the filter + ample yield
-  handle the leak). The shown puzzle displays its own level (computed from its trace, so it's
-  correct for code-loaded puzzles too).
+  `STALL_MS`); hard cap `DEFAULT_BUDGET_MS` (15 s). Per-level in-band hit rates ≈
+  100/93/39 % for L1–L3; the hard end now spans THREE bands (Schwer / Sehr schwer /
+  Extrem), split out of what used to be one top band, so L4–L6 each have lower
+  in-band yield handled by the in-band filter + ample yield. L3 is still the weak
+  spot — since Schwer starts at `maxB>6`, much of its config's stream classifies as
+  Schwer (and a slice now reaches Sehr schwer / Extrem). The shown puzzle displays
+  its own level (computed from its trace, so it's correct for code-loaded puzzles too).
 - **Grid generation injects sequences first.** Random fills almost never
   produce sequence lines, so the generator pre-fixes 0–3 lines (count from
   config / random) as sequences before backtracking the rest; `pickClues`

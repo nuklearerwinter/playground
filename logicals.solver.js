@@ -1180,22 +1180,27 @@ function puzzleProfile(trace) {
   return prof;
 }
 
-// Five difficulty levels. Classification takes the MAX of three axes, because no
-// single axis spans all five. Since B is combination-counted (bounded ~≤15), the
-// single hardest survey (maxB) separates the easy end and caps Mittel at B=6
-// (any 7+-combination survey ⇒ Schwer); the HARD end (4–5) is otherwise driven
-// by how many lines forced a genuine multi-combination survey
-// (nFeasHard = feasibility steps with b≥3). Clue TYPES set a floor for the easy
-// end (a duplicate to track ⇒ ≥"Leicht"; a line-sum to reason about ⇒ ≥"Mittel").
-// `cfg` biases generation toward the band (clue-type mix + the per-level
-// maxTotalSum/duplicate counts); the actual gate is puzzleLevel() on the solved
-// trace + clue features.
+// Six difficulty levels. Classification takes the MAX of three axes, because no
+// single axis spans all six. Since B is combination-counted, the single hardest
+// survey (maxB) separates the easy end and caps Mittel at B=6 (any 7+-combination
+// survey ⇒ Schwer). The HARD end (4–6) is anchored on maxB: 7–14 ⇒ Schwer,
+// 15–25 ⇒ Sehr schwer, >25 ⇒ Extrem. The single top band used to lump maxB 15→70
+// into one "Sehr schwer" (a 4.6× range that felt extreme); splitting at maxB=25
+// carves the genuine outliers (a single 26+-combination survey) into their own
+// "Extrem" level. `nFeasHard` (lines that forced a genuine multi-combination
+// survey) is a secondary hard signal (≥1 ⇒ Schwer, ≥2 ⇒ Sehr schwer) but does NOT
+// reach Extrem — that band is maxB-only, by design. Clue TYPES set a floor for the
+// easy end (a duplicate to track ⇒ ≥"Leicht"; a line-sum to reason about ⇒
+// ≥"Mittel"). `cfg` biases generation toward the band (clue-type mix + the
+// per-level maxTotalSum/duplicate counts); the actual gate is puzzleLevel() on the
+// solved trace + clue features.
 const LEVELS = [
   { id: 1, name: "Sehr leicht", cfg: { minTotalSum: 0, maxTotalSum: 0, minDupLines: 0, maxDupLines: 0, fewerPairSums: false } },
   { id: 2, name: "Leicht",      cfg: { minTotalSum: 0, maxTotalSum: 0, minDupLines: 1, maxDupLines: 1, fewerPairSums: false } },
   { id: 3, name: "Mittel",      cfg: { minTotalSum: 1, maxTotalSum: 2, minDupLines: 1, maxDupLines: 1, fewerPairSums: false } },
   { id: 4, name: "Schwer",      cfg: { minTotalSum: 2, maxTotalSum: 4, minDupLines: 1, maxDupLines: 2, fewerPairSums: false } },
   { id: 5, name: "Sehr schwer", cfg: { minTotalSum: 3, maxTotalSum: 6, minDupLines: 2, maxDupLines: 2, fewerPairSums: false } },
+  { id: 6, name: "Extrem",      cfg: { minTotalSum: 4, maxTotalSum: 6, minDupLines: 2, maxDupLines: 2, fewerPairSums: false } },
 ];
 // Clue-type features that gate the easy end (read from the clue SET, not the
 // trace — a sum/duplicate clue counts even if cheap rules dissolve it to b=1).
@@ -1207,19 +1212,19 @@ function clueFeatures(clues) {
   }
   return { hasSum, dupCount };
 }
-// Difficulty level (1–5) = max of three axes. (1) maxB (single hardest survey):
-// with combination-counting it tops out ~15; separates the easy end (sequences
-// give a ~4 baseline, so >4⇒2; Mittel ends at 6) and pushes any survey of 7+
-// combinations straight to Schwer (>6⇒4, >14⇒5 — Mittel itself is reached via
-// the sum-clue floor, axis 3). (2) WORK = nFeasHard, how many lines forced a
-// genuine ≥3-combination survey: ≥1 ⇒ Schwer, ≥2 ⇒ Sehr schwer (b≤2 feasibility
-// steps are essentially forced and don't count). (3) clue-type floor (sum ⇒ ≥3,
-// dup ⇒ ≥2). Calibrated empirically; hit rates ≈ 100/92/39/59/41 % (L3 is the
-// weak spot since Schwer absorbed the maxB 7–9 band; yield + filter cover it).
+// Difficulty level (1–6) = max of three axes. (1) maxB (single hardest survey):
+// separates the easy end (sequences give a ~4 baseline, so >4⇒2; Mittel ends at 6)
+// and drives the whole hard end — >6⇒4 (Schwer), >14⇒5 (Sehr schwer), >25⇒6
+// (Extrem). The >25 cut splits what used to be one "Sehr schwer" band (maxB 15→70)
+// so the genuine outliers get their own level. (2) WORK = nFeasHard, how many lines
+// forced a genuine ≥3-combination survey: ≥1 ⇒ Schwer, ≥2 ⇒ Sehr schwer (b≤2
+// feasibility steps are essentially forced and don't count). byWork caps at 5:
+// Extrem is reached via maxB only, so a "many surveys, none giant" puzzle stays at
+// Sehr schwer. (3) clue-type floor (sum ⇒ ≥3, dup ⇒ ≥2). Calibrated empirically.
 function puzzleLevel(profile, feat) {
   const maxB = profile.maxB, hard = profile.nFeasHard || 0;
   let byB = 1;
-  if (maxB > 14) byB = 5; else if (maxB > 6) byB = 4; else if (maxB > 4) byB = 2;
+  if (maxB > 25) byB = 6; else if (maxB > 14) byB = 5; else if (maxB > 6) byB = 4; else if (maxB > 4) byB = 2;
   let byWork = 1;
   if (hard >= 2) byWork = 5; else if (hard >= 1) byWork = 4;
   const byFeat = (feat && feat.hasSum) ? 3 : (feat && feat.dupCount >= 1) ? 2 : 1;

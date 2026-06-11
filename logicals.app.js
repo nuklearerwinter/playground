@@ -40,7 +40,7 @@ function killWorkers() {
   activeWorkers = [];
 }
 
-// The selected difficulty level (1–5) and the generation config that biases
+// The selected difficulty level (1–6) and the generation config that biases
 // generation toward its band. The actual gate is puzzleLevel() on the trace.
 function readConfig() {
   const sel = document.querySelector('input[name="level"]:checked');
