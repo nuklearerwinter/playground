@@ -31,7 +31,7 @@
   .difficulty-picker label { cursor: pointer; white-space: nowrap; }
   .difficulty-picker input { margin: 0 0.3em 0 0; }
   .mode-picker, .calib-inputs { margin: 0.6em 0 0; font-size: 0.95em; }
-  .calib-inputs input[type="number"] { width: 3.4em; margin-left: 0.2em; }
+  .calib-inputs select { margin-left: 0.2em; }
   /* `hidden` must win over the .difficulty-picker (flex) / .controls fieldset
      (inline-block) display rules when the mode switch hides a block. */
   #difficulty-picker[hidden], #calib-inputs[hidden] { display: none; }
@@ -293,8 +293,8 @@
     </div>
     <fieldset class="calib-inputs" id="calib-inputs" hidden>
       <span class="difficulty-picker-label">Kalibrierung:</span>
-      <label>b-Schwelle <input type="number" id="calib-threshold" min="2" max="9" step="1" value="4"></label>
-      <label>harte Schritte <input type="number" id="calib-count" min="0" max="30" step="1" value="6"></label>
+      <label>b-Schwelle <select id="calib-threshold"><option>2</option><option>3</option><option selected>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option></select></label>
+      <label>harte Schritte <select id="calib-count"><option>0</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option selected>6</option><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option><option>13</option><option>14</option><option>15</option><option>16</option><option>17</option><option>18</option><option>19</option><option>20</option><option>21</option><option>22</option><option>23</option><option>24</option><option>25</option><option>26</option><option>27</option><option>28</option><option>29</option><option>30</option></select></label>
     </fieldset>
     <p class="controls-hint" id="hint-level">Wählen Sie eine Schwierigkeitsstufe und erzeugen Sie ein Rätsel. Die Stufe bestimmt, wie viel man im Kopf durchdenken muss
       (von „nie mehr als ein offensichtlicher Schritt" bis „auch mal mit Zettel"). Höhere Stufen brauchen etwas länger zum Finden.</p>
