@@ -32,6 +32,9 @@
   .difficulty-picker input { margin: 0 0.3em 0 0; }
   .mode-picker, .calib-inputs { margin: 0.6em 0 0; font-size: 0.95em; }
   .calib-inputs input[type="number"] { width: 3.4em; margin-left: 0.2em; }
+  /* `hidden` must win over the .difficulty-picker (flex) / .controls fieldset
+     (inline-block) display rules when the mode switch hides a block. */
+  #difficulty-picker[hidden], #calib-inputs[hidden] { display: none; }
 
   /* Manual puzzle entry: a <details> panel mirroring the settings style,
      with two columns of inputs (rows A-F | cols 1-6) and action buttons. */
