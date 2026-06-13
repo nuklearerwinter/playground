@@ -1180,6 +1180,18 @@ function puzzleProfile(trace) {
   return prof;
 }
 
+// Number of trace steps whose per-step branching factor b reaches a threshold t.
+// This is the raw "how many genuinely hard deduction steps?" count behind the
+// calibration mode (UI lets a tester dial t and a target count to home in on a
+// felt difficulty). Repeated surveys of the same line each count — that is the
+// "I keep coming back to this line" grind, which is intentional here.
+function countHardSteps(trace, t) {
+  if (!trace || !trace.steps) return 0;
+  let n = 0;
+  for (const s of trace.steps) if ((s.b || 1) >= t) n++;
+  return n;
+}
+
 // Six difficulty levels. Classification takes the MAX of three axes, because no
 // single axis spans all six. Since B is combination-counted, the single hardest
 // survey (maxB) separates the easy end and caps Mittel at B=6 (any 7+-combination

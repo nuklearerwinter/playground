@@ -24,9 +24,12 @@ const DEFAULT_BUDGET_MS = 15 * 1000; // hard cap; early-stop usually finishes mu
 const MIN_SEARCH_MS = 1200;          // search at least this long (gather a few in-band puzzles)
 const STALL_MS = 1500;               // …then stop once the best hasn't improved for this long
 
-let bestInBand = null;   // candidate whose level === targetLevel, fewest clues
-let bestFallback = null; // closest-level candidate (only used if none in-band)
+let bestInBand = null;   // candidate matching the target (level OR calib profile), fewest clues
+let bestFallback = null; // closest candidate (only used if none in-band)
 let targetLevel = 3;
+let calibMode = false;   // calibration mode: target a raw hard-step profile, not a level
+let calibT = 4, calibN = 6; // b-threshold + target hard-step count (calib mode)
+const CALIB_TOL = 1;     // a puzzle counts as "on target" within ±1 hard step
 let lastImproveAt = 0;   // when chosenBest last improved (for early-stop)
 let searchTimer = null;
 let searchStart = 0, searchDeadline = 0, totalAttempts = 0;
@@ -42,14 +45,38 @@ function killWorkers() {
 
 // The selected difficulty level (1–6) and the generation config that biases
 // generation toward its band. The actual gate is puzzleLevel() on the trace.
+// In CALIBRATION mode the target is instead a raw profile (b-threshold + hard-
+// step count); the gate is countHardSteps(trace, threshold) ≈ hardCount.
 function readConfig() {
+  const modeSel = document.querySelector('input[name="genmode"]:checked');
+  const mode = modeSel ? modeSel.value : "level";
+  if (mode === "calib") {
+    const threshold = clampInt(el("calib-threshold").value, 2, 9, 4);
+    const hardCount = clampInt(el("calib-count").value, 0, 30, 6);
+    return {
+      mode: "calib", threshold, hardCount,
+      config: Object.assign({ numSequences: "random" }, calibrationConfig(hardCount)),
+    };
+  }
   const sel = document.querySelector('input[name="level"]:checked');
   const level = sel ? parseInt(sel.value, 10) : 3;
-  const lv = LEVELS[level - 1];
   return {
-    level,
-    config: Object.assign({ numSequences: "random" }, lv.cfg),
+    mode: "level", level,
+    config: Object.assign({ numSequences: "random" }, LEVELS[level - 1].cfg),
   };
+}
+function clampInt(v, lo, hi, dflt) {
+  let n = parseInt(v, 10);
+  if (!Number.isFinite(n)) n = dflt;
+  return Math.max(lo, Math.min(hi, n));
+}
+// cfg is only a generation BIAS (the profile-match filter does the real gating):
+// more target hard steps ⇒ borrow a higher level's clue mix (more sums/dups), so
+// the stream actually contains enough hard-step puzzles to filter from.
+function calibrationConfig(hardCount) {
+  let lv;
+  if (hardCount <= 1) lv = 2; else if (hardCount <= 4) lv = 4; else if (hardCount <= 8) lv = 5; else lv = 6;
+  return LEVELS[lv - 1].cfg;
 }
 
 function updateSearchStatus() {
@@ -63,8 +90,13 @@ function updateSearchStatus() {
   if (!b) best = "suche …";
   else {
     const mb = b.profile.maxB === Infinity ? "∞" : b.profile.maxB;
-    const miss = b.level !== targetLevel ? ` (Ziel: ${LEVELS[targetLevel - 1].name})` : "";
-    best = `${LEVELS[b.level - 1].name}${miss} · ${b.clueCount} Hinweise · maxB ${mb}`;
+    if (calibMode) {
+      const miss = b.hardCount !== calibN ? ` (Ziel: ${calibN})` : "";
+      best = `${b.hardCount} harte Schritte (b≥${calibT})${miss} · ${b.clueCount} Hinweise · maxB ${mb}`;
+    } else {
+      const miss = b.level !== targetLevel ? ` (Ziel: ${LEVELS[targetLevel - 1].name})` : "";
+      best = `${LEVELS[b.level - 1].name}${miss} · ${b.clueCount} Hinweise · maxB ${mb}`;
+    }
   }
   const secsLeft = Math.max(0, Math.ceil((searchDeadline - now) / 1000));
   const countdown = secsLeft >= 60 ? `noch ${Math.floor(secsLeft / 60)}m ${secsLeft % 60}s` : `noch ${secsLeft}s`;
@@ -83,12 +115,16 @@ function onWorkerMessage(e) {
     const profile = puzzleProfile(trace);
     const level = puzzleLevel(profile, clueFeatures(d.clues));
     const cand = { grid: d.grid, clues: d.clues, clueCount: d.clueCount, trace, profile, level };
-    if (level === targetLevel) {
-      // In band: keep the fewest-clue representative (mild elegance preference).
+    // Target = a difficulty band (level mode) or a hard-step count (calib mode).
+    let dist;
+    if (calibMode) { cand.hardCount = countHardSteps(trace, calibT); dist = Math.abs(cand.hardCount - calibN); }
+    else dist = Math.abs(level - targetLevel);
+    const onTarget = calibMode ? dist <= CALIB_TOL : level === targetLevel;
+    if (onTarget) {
+      // On target: keep the fewest-clue representative (mild elegance preference).
       if (!bestInBand || d.clueCount < bestInBand.clueCount) { bestInBand = cand; lastImproveAt = Date.now(); updateSearchStatus(); }
     } else if (!bestInBand) {
-      // No exact match yet: track the closest level as a fallback.
-      const dist = Math.abs(level - targetLevel);
+      // No on-target match yet: track the closest one as a fallback.
       if (!bestFallback || dist < bestFallback._dist || (dist === bestFallback._dist && d.clueCount < bestFallback.clueCount)) {
         cand._dist = dist; bestFallback = cand; lastImproveAt = Date.now(); updateSearchStatus();
       }
@@ -124,7 +160,9 @@ function startSearch(budgetMs) {
   bestInBand = null;
   bestFallback = null;
   const rc = readConfig();
-  targetLevel = rc.level;
+  calibMode = rc.mode === "calib";
+  if (calibMode) { calibT = rc.threshold; calibN = rc.hardCount; }
+  else targetLevel = rc.level;
   searchConfig = rc.config;
   killWorkers();
   searching = true;
@@ -160,11 +198,15 @@ function finishSearch() {
     el("error").textContent = `Kein lösbares Rätsel gefunden. Bitte „Neues Rätsel" erneut versuchen.`;
     return;
   }
-  if (best.level !== targetLevel) {
+  if (calibMode) {
+    if (best.hardCount !== calibN)
+      el("error").textContent = `Kein Rätsel mit ${calibN} harten Schritten (b≥${calibT}) gefunden — zeige das nächstliegende (${best.hardCount}). „Neues Rätsel" erneut versuchen oder Werte anpassen.`;
+  } else if (best.level !== targetLevel) {
     el("error").textContent = `Keine ${LEVELS[targetLevel - 1].name}-Stufe gefunden — zeige die nächstliegende (${LEVELS[best.level - 1].name}). „Neues Rätsel" erneut versuchen oder Stufe wechseln.`;
   }
   const code = encodePuzzle(best.clues);
   currentPuzzle = { grid: best.grid, clues: best.clues, code, clueCount: best.clueCount, trace: best.trace, level: best.level };
+  if (calibMode) currentPuzzle.calib = { threshold: calibT, hardCount: best.hardCount };
   renderPuzzle(currentPuzzle);
   el("print-btn").disabled = false;
   el("steps-btn").disabled = false;
@@ -234,7 +276,15 @@ function renderPuzzle(p) {
   let lvl = p.level;
   if (!lvl && p.trace) lvl = puzzleLevel(puzzleProfile(p.trace), clueFeatures(p.clues));
   const lvlName = lvl ? LEVELS[lvl - 1].name : "?";
-  document.getElementById("difficulty-label").textContent = `${lvlName} · ${p.clueCount} Hinweise`;
+  if (p.calib) {
+    // Calibration mode: show the achieved raw profile (the tester rates by feel;
+    // the old computed level is shown in brackets only for comparison).
+    const mb = p.trace ? puzzleProfile(p.trace).maxB : "?";
+    document.getElementById("difficulty-label").textContent =
+      `Kalibrierung: ${p.calib.hardCount} harte Schritte (b≥${p.calib.threshold}) · maxB ${mb} · ${p.clueCount} Hinweise · [Level: ${lvlName}]`;
+  } else {
+    document.getElementById("difficulty-label").textContent = `${lvlName} · ${p.clueCount} Hinweise`;
+  }
 
   const rowHints = document.getElementById("row-hints");
   rowHints.innerHTML = "";
@@ -750,6 +800,18 @@ function toggleSteps() { if (stepMode) exitStepMode(); else enterStepMode(); }
 
 document.getElementById("generate-btn").addEventListener("click", newSearch);
 document.getElementById("accept-btn").addEventListener("click", acceptNow);
+// Mode switch: "Stufe" shows the level picker, "Kalibrierung" the raw b-threshold
+// + hard-step-count inputs. Exclusive — only one set is visible/used at a time.
+function syncModeUI() {
+  const sel = document.querySelector('input[name="genmode"]:checked');
+  const calib = sel && sel.value === "calib";
+  el("difficulty-picker").hidden = calib;
+  el("calib-inputs").hidden = !calib;
+  el("hint-level").hidden = calib;
+  el("hint-calib").hidden = !calib;
+}
+Array.prototype.forEach.call(document.querySelectorAll('input[name="genmode"]'), r => r.addEventListener("change", syncModeUI));
+syncModeUI();
 // Load a puzzle from a code: decode → solve → set as currentPuzzle and render.
 // Returns the grid on success, null on failure (with error message side-effect).
 function loadPuzzleFromCode(code, errPrefix) {
