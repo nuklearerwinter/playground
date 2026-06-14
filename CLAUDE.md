@@ -58,8 +58,11 @@ Architectural points that are non-obvious from the code:
   gone; the UI is a single discrete 1–6 slider (`#level-slider`, with a live
   level-name label) in the "Stufe" tab — it only picks the *target* level;
   difficulty itself is still classified from the trace: Sehr leicht / Leicht /
-  Mittel / Schwer / Sehr schwer / Extrem. (Stufe / Kalibrierung / Editor are
-  three `role="tablist"` tabs; `readConfig`/`syncModeUI` read the active tab.)
+  Mittel / Schwer / Sehr schwer / Extrem. (Stufe / Kalibrierung / Editor / Code
+  are four `role="tablist"` tabs; `readConfig`/`syncModeUI` read the active tab.
+  "Editor" is the manual-entry panel, "Code" the puzzle-code input + Lösung
+  zeigen/verbergen; both hide the global "Rätsel generieren" button and load via
+  their own panel buttons.)
   The real difficulty signal is **`b`, the per-step branching factor** —
   how many candidate configurations a human must survey to justify a step
   (recorded on every trace step by `commit`; the `lineFeasibility` step counts
@@ -182,8 +185,8 @@ Architectural points that are non-obvious from the code:
   of an absent value, no removal of the SOLUTION value, no emptied domain, and
   that direct-sequence puzzles get a bundled fill).
 - **Manual puzzle entry (`parseManualLine` / `loadManualPuzzle`).** The
-  **"Editor" tab** — one of the three mode tabs (Stufe / Kalibrierung /
-  Editor) — is a `<div>` panel with 12 inputs (rows A–F + cols 1–6) that lets
+  **"Editor" tab** — one of the four mode tabs (Stufe / Kalibrierung /
+  Editor / Code) — is a `<div>` panel with 12 inputs (rows A–F + cols 1–6) that lets
   users transcribe magazine puzzles. (It used to be a collapsible `<details>`
   panel; it became a tab in the UI facelift, and `syncModeUI` shows exactly one
   panel per mode and hides the global "Rätsel generieren" button in Editor

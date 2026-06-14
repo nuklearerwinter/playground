@@ -813,11 +813,12 @@ function syncModeUI() {
   el("difficulty-picker").hidden = mode !== "level";
   el("calib-inputs").hidden = mode !== "calib";
   el("manual-entry").hidden = mode !== "manual";
+  el("reveal").hidden = mode !== "code";
   el("hint-level").hidden = mode !== "level";
   el("hint-calib").hidden = mode !== "calib";
-  // Im Editor-Modus lädt man per "Rätsel laden" (Button im Panel); der globale
-  // "Rätsel generieren"-Button passt dort nicht.
-  el("generate-btn").hidden = mode === "manual";
+  // In Editor-/Code-Modus lädt man per panel-eigenem Button ("Rätsel laden" bzw.
+  // "Lösung zeigen"); der globale "Rätsel generieren"-Button passt dort nicht.
+  el("generate-btn").hidden = mode === "manual" || mode === "code";
 }
 // Modus-Tabs: den geklickten Tab als aria-selected markieren, dann die
 // mode-abhängige UI (Slider ↔ Kalibrier-Inputs) synchronisieren.
@@ -1062,6 +1063,8 @@ document.getElementById("reveal-btn").addEventListener("click", () => {
   }
   exitStepMode();
   showSolution(grid);
+  // Code-Tab sitzt oben, das Rätsel rendert darunter — Gitter sichtbar scrollen.
+  document.getElementById("grid").scrollIntoView({ behavior: "smooth", block: "center" });
 });
 document.getElementById("hide-btn").addEventListener("click", () => {
   hideSolution();

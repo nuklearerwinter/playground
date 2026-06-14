@@ -67,7 +67,7 @@
   .calib-inputs select { margin-left: 0.2em; width: auto; margin-bottom: 0; display: inline-block; }
   /* `hidden` must win over the .difficulty-picker (flex) / .controls fieldset
      (inline-block) display rules when the mode switch hides a block. */
-  #difficulty-picker[hidden], #calib-inputs[hidden], #manual-entry[hidden] { display: none; }
+  #difficulty-picker[hidden], #calib-inputs[hidden], #manual-entry[hidden], #reveal[hidden] { display: none; }
 
   /* Manual puzzle entry: the "Editor" tab panel — two columns of inputs
      (rows A-F | cols 1-6) and action buttons. Borderless like the other tab
@@ -245,7 +245,7 @@
   .solution-code .qr-wrap svg { display: block; width: 130px; height: 130px; background: white; padding: 4px; border-radius: 3px; }
   .solution-code .qr-wrap a.qr-link { display: inline-block; text-decoration: none; color: inherit; line-height: 0; border-radius: 3px; }
   .solution-code .qr-wrap a.qr-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .reveal { display: flex; gap: 0.4em; flex-wrap: wrap; align-items: center; margin: 1em 0; }
+  .reveal { display: flex; gap: 0.4em; flex-wrap: wrap; align-items: center; margin: 0.6em 0 0; }
   .reveal input { flex: 1 1 12em; min-width: 0; font-family: "Courier New", monospace; margin-bottom: 0; }
   #error { color: #c33; min-height: 1.2em; margin: 0.3em 0; font-style: italic; }
   .footer { text-align: right; color: #888; font-size: 0.9em; font-style: italic; margin-top: 1em; }
@@ -319,6 +319,7 @@
       <button type="button" role="tab" data-mode="level" aria-selected="true">Stufe</button>
       <button type="button" role="tab" data-mode="calib" aria-selected="false">Kalibrierung</button>
       <button type="button" role="tab" data-mode="manual" aria-selected="false">Editor</button>
+      <button type="button" role="tab" data-mode="code" aria-selected="false">Code</button>
     </div>
     <div class="difficulty-picker" id="difficulty-picker">
       <div class="level-head">
@@ -366,6 +367,11 @@
         <button type="button" id="manual-clear-btn">Felder leeren</button>
       </div>
       <div id="manual-error" class="manual-error"></div>
+    </div>
+    <div class="reveal" id="reveal" hidden>
+      <input type="text" id="code-input" placeholder="Rätselcode eingeben …" autocomplete="off" spellcheck="false">
+      <button id="reveal-btn">Lösung zeigen</button>
+      <button id="hide-btn">Lösung verbergen</button>
     </div>
     <p class="controls-hint" id="hint-level">Wählen Sie eine Schwierigkeitsstufe und erzeugen Sie ein Rätsel. Die Stufe bestimmt, wie viel man im Kopf durchdenken muss
       (von „nie mehr als ein offensichtlicher Schritt" bis „auch mal mit Zettel"). Höhere Stufen brauchen etwas länger zum Finden.</p>
@@ -415,11 +421,6 @@
     </div>
   </section>
 
-  <div class="reveal">
-    <input type="text" id="code-input" placeholder="Rätselcode eingeben …" autocomplete="off" spellcheck="false">
-    <button id="reveal-btn">Lösung zeigen</button>
-    <button id="hide-btn">Lösung verbergen</button>
-  </div>
   <dialog id="syntax-dialog" class="syntax-dialog">
     <h3>Hinweis-Syntax</h3>
     <table class="syntax-table">
