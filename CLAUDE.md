@@ -53,9 +53,14 @@ Architectural points that are non-obvious from the code:
   totalSum before pairSum). That removes totalSum hints almost entirely and
   yields ~11–20 clues depending on luck. The `targetClues > 0` rebalance path
   still exists but is unused by the app.
-- **Difficulty = 6 levels, classified from the solve trace (no sliders).** The
-  old per-knob settings panel is gone; the UI is one radio group (`name="level"`,
-  1–6): Sehr leicht / Leicht / Mittel / Schwer / Sehr schwer / Extrem. The real difficulty signal is **`b`, the per-step branching factor** —
+- **Difficulty = 6 levels, classified from the solve trace (the level is
+  derived, not a knob the user tunes).** The old per-knob settings panel is
+  gone; the UI is a single discrete 1–6 slider (`#level-slider`, with a live
+  level-name label) in the "Stufe" tab — it only picks the *target* level;
+  difficulty itself is still classified from the trace: Sehr leicht / Leicht /
+  Mittel / Schwer / Sehr schwer / Extrem. (Stufe / Kalibrierung / Editor are
+  three `role="tablist"` tabs; `readConfig`/`syncModeUI` read the active tab.)
+  The real difficulty signal is **`b`, the per-step branching factor** —
   how many candidate configurations a human must survey to justify a step
   (recorded on every trace step by `commit`; the `lineFeasibility` step counts
   the **distinct value-COMBINATIONS** (multisets) that fill the line — NOT the
@@ -176,27 +181,30 @@ Architectural points that are non-obvious from the code:
   `/tmp/lt/trace.js`: assert solved, replayed `removals` == solution, no removal
   of an absent value, no removal of the SOLUTION value, no emptied domain, and
   that direct-sequence puzzles get a bundled fill).
-- **Manual puzzle entry (`parseManualLine` / `loadManualPuzzle`).** A
-  collapsible `<details>` panel with 12 inputs (rows A–F + cols 1–6) lets
-  users transcribe magazine puzzles. Syntax per field (case-insensitive,
-  `;` or `,` separated): `A3+A4=11` (pairSum, both cells must be in the
-  current line and adjacent), `SUM=29`, `5x2`/`5x`/`2x5`/`5²` (all 4 forms
-  mean "value 5 appears twice"), `RUN ASC`/`RUN DESC`/`ASC`/`DESC`. After
-  parsing, the clues run through `solveWithTrace`; **non-deducible inputs are
-  hard-rejected** (no backtracking fallback — magazines are expected to be
-  deducible, and our solver's coverage is the contract). On success it goes
-  through `renderPuzzle` like any generated puzzle, including a freshly
-  generated `encodePuzzle`-code that makes it shareable. The "Beispiel laden"
-  button fills in `MANUAL_EXAMPLE`, a real generator output kept in the file
-  for syntax orientation. Validate with `/tmp/lt/parser.js`: assert the
-  example parses + solves, and a handful of malformed inputs are rejected
-  with the right error message. The fields are also **auto-synced** from the
-  current puzzle (via `fmtLineForInput`/`syncManualFieldsFromCurrent` called
-  at the end of `renderPuzzle`) — generated puzzles, QR loads and manual
-  entries all reformat into canonical syntax in the editor, so any loaded
-  puzzle is a working example, edit-and-reload works, and the
-  format-then-parse round-trip is lossless (validated by
-  `/tmp/lt/sync-roundtrip.js`).
+- **Manual puzzle entry (`parseManualLine` / `loadManualPuzzle`).** The
+  **"Editor" tab** — one of the three mode tabs (Stufe / Kalibrierung /
+  Editor) — is a `<div>` panel with 12 inputs (rows A–F + cols 1–6) that lets
+  users transcribe magazine puzzles. (It used to be a collapsible `<details>`
+  panel; it became a tab in the UI facelift, and `syncModeUI` shows exactly one
+  panel per mode and hides the global "Rätsel generieren" button in Editor
+  mode.) Syntax per field (case-insensitive, `;` or `,` separated): `A3+A4=11`
+  (pairSum, both cells must be in the current line and adjacent), `SUM=29`,
+  `5x2`/`5x`/`2x5`/`5²` (all 4 forms mean "value 5 appears twice"),
+  `RUN ASC`/`RUN DESC`/`ASC`/`DESC`. After parsing, the clues run through
+  `solveWithTrace`; **non-deducible inputs are hard-rejected** (no backtracking
+  fallback — magazines are expected to be deducible, and our solver's coverage
+  is the contract). On success it goes through `renderPuzzle` like any
+  generated puzzle, including a freshly generated `encodePuzzle`-code that makes
+  it shareable. Validate with `/tmp/lt/parser.js`: assert a representative
+  puzzle parses + solves, and a handful of malformed inputs are rejected with
+  the right error message. The fields are **auto-synced** from the current
+  puzzle (via `fmtLineForInput`/`syncManualFieldsFromCurrent` called at the end
+  of `renderPuzzle`) — generated puzzles, QR loads and manual entries all
+  reformat into canonical syntax in the editor, so any loaded puzzle is a
+  working example. (This auto-sync is why the old "Beispiel laden" button and
+  its `MANUAL_EXAMPLE` fixture were removed — a real example is always present.)
+  Edit-and-reload works, and the format-then-parse round-trip is lossless
+  (validated by `/tmp/lt/sync-roundtrip.js`).
 
 ## Running and testing
 

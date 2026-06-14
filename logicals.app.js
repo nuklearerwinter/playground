@@ -866,25 +866,6 @@ function loadPuzzleFromCode(code, errPrefix) {
 // determines which pairs are accepted (row-A field → only A?+A? pairs; col-3
 // field → only ?3+?3 pairs).
 
-const MANUAL_EXAMPLE = {
-  rows: [
-    "DESC",
-    "B2+B3=12; SUM=32",
-    "C4+C5=13",
-    "1x2",
-    "RUN DESC",
-    "ASC",
-  ],
-  cols: [
-    "",
-    "B2+C2=13",
-    "E3+F3=7; SUM=30",
-    "B4+C4=17; D4+E4=10",
-    "5x2",
-    "B6+C6=11; C6+D6=15; D6+E6=9",
-  ],
-};
-
 function parseCell(s) {
   // s is a string like "A3" (case already normalised). Returns [r, c] or null.
   if (s.length !== 2) return null;
