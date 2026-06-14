@@ -472,6 +472,7 @@ function enterStepMode() {
   el("step-panel").hidden = false;
   el("steps-btn").textContent = "Lösungsweg ausblenden";
   renderStep();
+  document.getElementById("grid").scrollIntoView({ behavior: "smooth", block: "center" });
 }
 // Kandidaten-Bitmasken nach Anwendung der ersten `upto` Schritte.
 function stepCandidates(upto) {
