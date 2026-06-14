@@ -1,19 +1,35 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="de" data-theme="light">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Logicals Rätselgenerator</title>
+<link rel="stylesheet" href="pico.min.css">
 <style>
   :root { --accent: #1a8c8c; }
-  body { font-family: Georgia, "Times New Roman", serif; max-width: 1100px; margin: 1em auto; padding: 0 0.7em; color: #222; }
+  /* Pico v2 auf die App-Teal-Farbe umfärben, damit Buttons/Links/Fokus zum
+     Grid-Akzent passen. Höhere Spezifität als Picos [data-theme=light]. */
+  :root[data-theme="light"] {
+    --pico-primary-background: #1a8c8c;
+    --pico-primary-hover-background: #157575;
+    --pico-primary-border: var(--pico-primary-background);
+    --pico-primary-hover-border: var(--pico-primary-hover-background);
+    --pico-primary: #137070;
+    --pico-primary-hover: #0e5757;
+    --pico-primary-focus: rgba(26, 140, 140, 0.375);
+    --pico-primary-underline: rgba(26, 140, 140, 0.5);
+  }
+  /* Body: Layout-Breite bleibt unser, Schrift/Farbe übernimmt Pico (das Grid
+     setzt seine Georgia-Schrift weiterhin selbst). */
+  body { max-width: 1100px; margin: 1em auto; padding: 0 0.7em; }
   h1 { color: var(--accent); margin: 0 0 0.2em; }
   .intro { color: #555; font-size: 0.95em; margin: 0 0 1em; }
   .controls { background: #f4f4f4; padding: 1em 1.2em; border-radius: 8px; margin-bottom: 1.2em; }
-  .controls fieldset { border: 1px solid #bbb; border-radius: 4px; display: inline-block; padding: 0.2em 0.8em; margin-right: 0.8em; vertical-align: middle; }
+  .controls fieldset { border: 1px solid #bbb; border-radius: 4px; display: inline-block; padding: 0.2em 0.8em; margin-right: 0.8em; margin-bottom: 0; vertical-align: middle; }
   .controls label { display: inline-flex; align-items: center; gap: 0.3em; margin-right: 0.5em; }
   .controls label input[type="radio"] { margin: 0; }
   .controls-hint { color: #666; font-size: 0.85em; margin: 0.6em 0 0; line-height: 1.4; }
+  .controls-actions { margin: 0.9em 0 0; display: flex; flex-wrap: wrap; gap: 0.5em; }
   .settings { margin: 0.6em 0 0; font-size: 0.9em; }
   .settings summary { cursor: pointer; color: var(--accent); width: max-content; }
   .settings-grid { display: grid; grid-template-columns: max-content max-content; gap: 0.4em 0.7em; align-items: center; margin: 0.6em 0 0; }
@@ -26,20 +42,37 @@
   .settings-grid .slider-row .slider-modifier input { margin: 0 0.3em 0 0; }
   .settings-note { color: #777; font-size: 0.82em; line-height: 1.35; margin: 0.6em 0 0; }
   .settings-actions { margin: 0.5em 0 0; }
-  .difficulty-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3em 0.9em; margin: 0.6em 0 0; font-size: 0.95em; }
+  .difficulty-picker { display: flex; flex-direction: column; gap: 0.35em; margin: 0.6em 0 0; font-size: 0.95em; max-width: 32em; }
   .difficulty-picker-label { font-weight: bold; }
-  .difficulty-picker label { cursor: pointer; white-space: nowrap; }
-  .difficulty-picker input { margin: 0 0.3em 0 0; }
-  .mode-picker, .calib-inputs { margin: 0.6em 0 0; font-size: 0.95em; }
-  .calib-inputs select { margin-left: 0.2em; }
+  .difficulty-picker .level-head { display: flex; align-items: baseline; gap: 0.5em; }
+  .difficulty-picker .level-name { font-weight: bold; color: var(--accent); font-size: 1.05em; }
+  .difficulty-picker .level-slider-row { display: flex; align-items: center; gap: 0.7em; }
+  .difficulty-picker .level-slider-row input[type="range"] { flex: 1 1 auto; margin: 0; }
+  .difficulty-picker .level-anchor { color: #777; font-size: 0.85em; white-space: nowrap; }
+  /* Modus als echte Tab-Leiste — Pico hat keine Tabs, daher schlankes Eigen-CSS:
+     Text-Tabs mit Unterstrich-Indikator (nicht als Buttons), eigene Zeile,
+     durchgehende Grundlinie, aktiver Tab teal unterstrichen. */
+  .mode-picker { display: flex; gap: 0.3em; margin: 0.4em 0 0; border-bottom: 1px solid var(--pico-muted-border-color, #d6d6d6); }
+  .mode-picker button {
+    margin: 0 0 -1px; padding: 0.45em 0.95em;
+    background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0;
+    box-shadow: none; color: #6a6a6a; font-weight: normal; font-size: 0.97em; cursor: pointer;
+  }
+  .mode-picker button:hover { background: none; color: var(--accent); }
+  .mode-picker button[aria-selected="true"] { color: var(--accent); font-weight: bold; border-bottom-color: var(--accent); }
+  .mode-picker button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* Kalibrier-Inputs randlos wie die Schwierigkeit (kein fieldset-Kasten),
+     Label + die zwei Dropdowns in einer Zeile. */
+  .calib-inputs { margin: 0.6em 0 0; font-size: 0.95em; display: flex; flex-wrap: wrap; align-items: center; gap: 0.4em 0.9em; }
+  .calib-inputs select { margin-left: 0.2em; width: auto; margin-bottom: 0; display: inline-block; }
   /* `hidden` must win over the .difficulty-picker (flex) / .controls fieldset
      (inline-block) display rules when the mode switch hides a block. */
-  #difficulty-picker[hidden], #calib-inputs[hidden] { display: none; }
+  #difficulty-picker[hidden], #calib-inputs[hidden], #manual-entry[hidden] { display: none; }
 
-  /* Manual puzzle entry: a <details> panel mirroring the settings style,
-     with two columns of inputs (rows A-F | cols 1-6) and action buttons. */
-  .manual-entry { margin: 0.8em 0; font-size: 0.95em; border: 1px solid #ddd; border-radius: 5px; padding: 0.4em 0.8em; background: #fafafa; }
-  .manual-entry summary { cursor: pointer; color: var(--accent); font-weight: bold; padding: 0.2em 0; }
+  /* Manual puzzle entry: the "Editor" tab panel — two columns of inputs
+     (rows A-F | cols 1-6) and action buttons. Borderless like the other tab
+     panels (Schwierigkeit/Kalibrierung). */
+  .manual-entry { margin: 0.6em 0 0; font-size: 0.95em; }
   .manual-hint { margin: 0.5em 0 0.6em; color: #555; font-size: 0.9em; line-height: 1.35; }
   .manual-hint code { background: #eee; padding: 0 0.25em; border-radius: 2px; font-size: 0.95em; }
   .link-btn { background: none; border: none; color: var(--accent); padding: 0 0.2em; font-weight: bold; cursor: pointer; font-size: inherit; box-shadow: none; }
@@ -48,7 +81,7 @@
   .manual-section h4 { margin: 0.3em 0 0.4em; font-size: 0.95em; color: #333; }
   .manual-line { display: flex; align-items: center; gap: 0.4em; margin: 0.18em 0; }
   .manual-line label { display: inline-block; width: 1.3em; font-weight: bold; color: #444; text-align: right; flex: 0 0 auto; }
-  .manual-line input { flex: 1 1 auto; min-width: 0; padding: 0.32em 0.45em; border: 1px solid #ccc; border-radius: 3px; font-family: "Courier New", monospace; font-size: 0.92em; background: white; }
+  .manual-line input { flex: 1 1 auto; min-width: 0; font-family: "Courier New", monospace; font-size: 0.92em; margin-bottom: 0; }
   .manual-line input.field-bad { border-color: #c33; background: #fff4f4; }
   .manual-actions { margin: 0.7em 0 0.2em; display: flex; flex-wrap: wrap; gap: 0.4em; }
   .manual-actions button { padding: 0.5em 0.9em; font-size: 0.95em; }
@@ -70,9 +103,9 @@
   .syntax-example code { background: #eee; padding: 0.05em 0.3em; border-radius: 2px; }
   .syntax-dialog form { margin: 0.8em 0 0; text-align: right; }
   .syntax-dialog form button { padding: 0.45em 1.2em; }
-  button { display: inline-flex; align-items: center; justify-content: center; gap: 0.3em; line-height: 1; padding: 0.55em 1.1em; font-size: 1em; cursor: pointer; margin: 0.2em 0.2em; border-radius: 4px; border: 1.5px solid var(--accent); background: white; color: var(--accent); font-family: inherit; box-sizing: border-box; }
-  button:hover:not(:disabled) { background: var(--accent); color: white; }
-  button:disabled { opacity: 0.5; cursor: progress; }
+  /* Buttons werden von Pico gestylt. Nur das „läuft gerade"-Cursor-Signal beim
+     Generieren behalten wir (Pico zeigt sonst not-allowed). */
+  button:disabled { cursor: progress; }
   #progress { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4em 0.7em; margin-top: 0.7em; color: #555; }
   #progress[hidden] { display: none; }
   #progress span { font-size: 0.9em; }
@@ -87,9 +120,11 @@
   .hints .label { display: inline-block; min-width: 1.8em; font-weight: bold; color: var(--accent); }
   /* Responsive grid: cells scale with the viewport (so 7 columns always fit a
      phone) but cap near the original desktop size; the font follows the cell. */
-  table#grid { --cell: clamp(32px, 11.5vw, 64px); border-collapse: collapse; margin: 1.2em auto 1em; }
-  table#grid th { width: var(--cell); height: var(--cell); font-size: calc(var(--cell) * 0.42); color: var(--accent); font-family: Georgia, serif; font-weight: bold; }
-  table#grid td { width: var(--cell); height: var(--cell); border: 1.5px solid #222; text-align: center; font-size: calc(var(--cell) * 0.42); vertical-align: middle; background: white; font-family: Georgia, serif; }
+  /* width:auto + padding:0 halten Picos globale `:where(table){width:100%}`
+     und `:where(td){padding}` vom Grid fern. */
+  table#grid { --cell: clamp(32px, 11.5vw, 64px); width: auto; border-collapse: collapse; margin: 1.2em auto 1em; }
+  table#grid th { width: var(--cell); height: var(--cell); padding: 0; font-size: calc(var(--cell) * 0.42); color: var(--accent); font-family: Georgia, serif; font-weight: bold; }
+  table#grid td { width: var(--cell); height: var(--cell); padding: 0; border: 1.5px solid #222; text-align: center; font-size: calc(var(--cell) * 0.42); vertical-align: middle; background: white; font-family: Georgia, serif; }
   /* Lösungsweg-Modus: Kandidaten als Pencil-Marks; etwas größere Zellen für Lesbarkeit. */
   table#grid.pencil { --cell: clamp(42px, 13vw, 72px); }
   table#grid.pencil td { padding: 0; }
@@ -206,7 +241,7 @@
   .solution-code .qr-wrap a.qr-link { display: inline-block; text-decoration: none; color: inherit; line-height: 0; border-radius: 3px; }
   .solution-code .qr-wrap a.qr-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .reveal { display: flex; gap: 0.4em; flex-wrap: wrap; align-items: center; margin: 1em 0; }
-  .reveal input { padding: 0.55em 0.6em; font-family: "Courier New", monospace; flex: 1 1 12em; min-width: 0; border: 1px solid #bbb; border-radius: 4px; font-size: 1em; }
+  .reveal input { flex: 1 1 12em; min-width: 0; font-family: "Courier New", monospace; margin-bottom: 0; }
   #error { color: #c33; min-height: 1.2em; margin: 0.3em 0; font-style: italic; }
   .footer { text-align: right; color: #888; font-size: 0.9em; font-style: italic; margin-top: 1em; }
 
@@ -275,32 +310,67 @@
   </header>
 
   <section class="controls" id="controls">
-    <button id="generate-btn">Neues Rätsel</button>
-    <button id="print-btn" disabled>Drucken</button>
-    <fieldset class="mode-picker" id="mode-picker">
-      <span class="difficulty-picker-label">Modus:</span>
-      <label><input type="radio" name="genmode" value="level" checked> Stufe</label>
-      <label><input type="radio" name="genmode" value="calib"> Kalibrierung</label>
-    </fieldset>
-    <div class="difficulty-picker" id="difficulty-picker">
-      <span class="difficulty-picker-label">Schwierigkeit:</span>
-      <label><input type="radio" name="level" value="1"> Sehr leicht</label>
-      <label><input type="radio" name="level" value="2"> Leicht</label>
-      <label><input type="radio" name="level" value="3" checked> Mittel</label>
-      <label><input type="radio" name="level" value="4"> Schwer</label>
-      <label><input type="radio" name="level" value="5"> Sehr schwer</label>
-      <label><input type="radio" name="level" value="6"> Extrem</label>
+    <div class="mode-picker" id="mode-picker" role="tablist" aria-label="Modus">
+      <button type="button" role="tab" data-mode="level" aria-selected="true">Stufe</button>
+      <button type="button" role="tab" data-mode="calib" aria-selected="false">Kalibrierung</button>
+      <button type="button" role="tab" data-mode="manual" aria-selected="false">Editor</button>
     </div>
-    <fieldset class="calib-inputs" id="calib-inputs" hidden>
+    <div class="difficulty-picker" id="difficulty-picker">
+      <div class="level-head">
+        <span class="difficulty-picker-label">Schwierigkeit:</span>
+        <output class="level-name" id="level-name" for="level-slider">Mittel</output>
+      </div>
+      <div class="level-slider-row">
+        <span class="level-anchor">leicht</span>
+        <input type="range" id="level-slider" name="level" min="1" max="6" step="1" value="3" aria-label="Schwierigkeit">
+        <span class="level-anchor">schwer</span>
+      </div>
+    </div>
+    <div class="calib-inputs" id="calib-inputs" hidden>
       <span class="difficulty-picker-label">Kalibrierung:</span>
       <label>b-Schwelle <select id="calib-threshold"><option>2</option><option>3</option><option selected>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option></select></label>
       <label>harte Schritte <select id="calib-count"><option>0</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option selected>6</option><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option><option>13</option><option>14</option><option>15</option><option>16</option><option>17</option><option>18</option><option>19</option><option>20</option><option>21</option><option>22</option><option>23</option><option>24</option><option>25</option><option>26</option><option>27</option><option>28</option><option>29</option><option>30</option></select></label>
-    </fieldset>
+    </div>
+    <div class="manual-entry" id="manual-entry" hidden>
+      <p class="manual-hint">
+        Pro Reihe und Spalte ein Feld. Mehrere Hinweise mit <code>;</code> oder <code>,</code> trennen.
+        <button type="button" id="syntax-help-btn" class="link-btn">Syntax-Hilfe&nbsp;▾</button>
+      </p>
+      <div class="manual-grid">
+        <div class="manual-section">
+          <h4>Reihen</h4>
+          <div class="manual-line"><label for="m-r-0">A:</label><input id="m-r-0" type="text" data-kind="row" data-idx="0" autocomplete="off" spellcheck="false"></div>
+          <div class="manual-line"><label for="m-r-1">B:</label><input id="m-r-1" type="text" data-kind="row" data-idx="1" autocomplete="off" spellcheck="false"></div>
+          <div class="manual-line"><label for="m-r-2">C:</label><input id="m-r-2" type="text" data-kind="row" data-idx="2" autocomplete="off" spellcheck="false"></div>
+          <div class="manual-line"><label for="m-r-3">D:</label><input id="m-r-3" type="text" data-kind="row" data-idx="3" autocomplete="off" spellcheck="false"></div>
+          <div class="manual-line"><label for="m-r-4">E:</label><input id="m-r-4" type="text" data-kind="row" data-idx="4" autocomplete="off" spellcheck="false"></div>
+          <div class="manual-line"><label for="m-r-5">F:</label><input id="m-r-5" type="text" data-kind="row" data-idx="5" autocomplete="off" spellcheck="false"></div>
+        </div>
+        <div class="manual-section">
+          <h4>Spalten</h4>
+          <div class="manual-line"><label for="m-c-0">1:</label><input id="m-c-0" type="text" data-kind="col" data-idx="0" autocomplete="off" spellcheck="false"></div>
+          <div class="manual-line"><label for="m-c-1">2:</label><input id="m-c-1" type="text" data-kind="col" data-idx="1" autocomplete="off" spellcheck="false"></div>
+          <div class="manual-line"><label for="m-c-2">3:</label><input id="m-c-2" type="text" data-kind="col" data-idx="2" autocomplete="off" spellcheck="false"></div>
+          <div class="manual-line"><label for="m-c-3">4:</label><input id="m-c-3" type="text" data-kind="col" data-idx="3" autocomplete="off" spellcheck="false"></div>
+          <div class="manual-line"><label for="m-c-4">5:</label><input id="m-c-4" type="text" data-kind="col" data-idx="4" autocomplete="off" spellcheck="false"></div>
+          <div class="manual-line"><label for="m-c-5">6:</label><input id="m-c-5" type="text" data-kind="col" data-idx="5" autocomplete="off" spellcheck="false"></div>
+        </div>
+      </div>
+      <div class="manual-actions">
+        <button type="button" id="manual-load-btn">Rätsel laden</button>
+        <button type="button" id="manual-clear-btn">Felder leeren</button>
+      </div>
+      <div id="manual-error" class="manual-error"></div>
+    </div>
     <p class="controls-hint" id="hint-level">Wählen Sie eine Schwierigkeitsstufe und erzeugen Sie ein Rätsel. Die Stufe bestimmt, wie viel man im Kopf durchdenken muss
       (von „nie mehr als ein offensichtlicher Schritt" bis „auch mal mit Zettel"). Höhere Stufen brauchen etwas länger zum Finden.</p>
     <p class="controls-hint" id="hint-calib" hidden>Kalibrier-Modus: Gesucht wird ein Rätsel mit <em>genau so vielen</em> harten Deduktionsschritten („hart" = Verzweigungsfaktor b ≥ Schwelle).
       Triviale Schritte zählen nicht. Stelle die zwei Werte ein, erzeuge, löse — und taste dich über einen der beiden Werte (rauf/runter) an deine Wunsch-Stufe heran.
       Wenn es passt: <strong>Rätselcode + gefühlte Stufe notieren</strong>. Hohe Schrittzahlen sind selten und brauchen länger.</p>
+    <div class="controls-actions">
+      <button id="generate-btn">Rätsel generieren</button>
+      <button id="print-btn" disabled>Drucken</button>
+    </div>
     <div id="progress" hidden>
       <progress id="progress-bar" max="100" value="0"></progress>
       <span id="status">Erzeuge Rätsel …</span>
@@ -344,40 +414,6 @@
     <button id="reveal-btn">Lösung zeigen</button>
     <button id="hide-btn">Lösung verbergen</button>
   </div>
-  <details class="manual-entry" id="manual-entry">
-    <summary>Rätsel-Editor</summary>
-    <p class="manual-hint">
-      Pro Reihe und Spalte ein Feld. Mehrere Hinweise mit <code>;</code> oder <code>,</code> trennen.
-      <button type="button" id="syntax-help-btn" class="link-btn">Syntax-Hilfe&nbsp;▾</button>
-    </p>
-    <div class="manual-grid">
-      <div class="manual-section">
-        <h4>Reihen</h4>
-        <div class="manual-line"><label for="m-r-0">A:</label><input id="m-r-0" type="text" data-kind="row" data-idx="0" autocomplete="off" spellcheck="false"></div>
-        <div class="manual-line"><label for="m-r-1">B:</label><input id="m-r-1" type="text" data-kind="row" data-idx="1" autocomplete="off" spellcheck="false"></div>
-        <div class="manual-line"><label for="m-r-2">C:</label><input id="m-r-2" type="text" data-kind="row" data-idx="2" autocomplete="off" spellcheck="false"></div>
-        <div class="manual-line"><label for="m-r-3">D:</label><input id="m-r-3" type="text" data-kind="row" data-idx="3" autocomplete="off" spellcheck="false"></div>
-        <div class="manual-line"><label for="m-r-4">E:</label><input id="m-r-4" type="text" data-kind="row" data-idx="4" autocomplete="off" spellcheck="false"></div>
-        <div class="manual-line"><label for="m-r-5">F:</label><input id="m-r-5" type="text" data-kind="row" data-idx="5" autocomplete="off" spellcheck="false"></div>
-      </div>
-      <div class="manual-section">
-        <h4>Spalten</h4>
-        <div class="manual-line"><label for="m-c-0">1:</label><input id="m-c-0" type="text" data-kind="col" data-idx="0" autocomplete="off" spellcheck="false"></div>
-        <div class="manual-line"><label for="m-c-1">2:</label><input id="m-c-1" type="text" data-kind="col" data-idx="1" autocomplete="off" spellcheck="false"></div>
-        <div class="manual-line"><label for="m-c-2">3:</label><input id="m-c-2" type="text" data-kind="col" data-idx="2" autocomplete="off" spellcheck="false"></div>
-        <div class="manual-line"><label for="m-c-3">4:</label><input id="m-c-3" type="text" data-kind="col" data-idx="3" autocomplete="off" spellcheck="false"></div>
-        <div class="manual-line"><label for="m-c-4">5:</label><input id="m-c-4" type="text" data-kind="col" data-idx="4" autocomplete="off" spellcheck="false"></div>
-        <div class="manual-line"><label for="m-c-5">6:</label><input id="m-c-5" type="text" data-kind="col" data-idx="5" autocomplete="off" spellcheck="false"></div>
-      </div>
-    </div>
-    <div class="manual-actions">
-      <button type="button" id="manual-load-btn">Rätsel laden</button>
-      <button type="button" id="manual-example-btn">Beispiel laden</button>
-      <button type="button" id="manual-clear-btn">Felder leeren</button>
-    </div>
-    <div id="manual-error" class="manual-error"></div>
-  </details>
-
   <dialog id="syntax-dialog" class="syntax-dialog">
     <h3>Hinweis-Syntax</h3>
     <table class="syntax-table">

@@ -48,8 +48,8 @@ function killWorkers() {
 // In CALIBRATION mode the target is instead a raw profile (b-threshold + hard-
 // step count); the gate is countHardSteps(trace, threshold) ≈ hardCount.
 function readConfig() {
-  const modeSel = document.querySelector('input[name="genmode"]:checked');
-  const mode = modeSel ? modeSel.value : "level";
+  const modeBtn = document.querySelector('#mode-picker button[aria-selected="true"]');
+  const mode = modeBtn ? modeBtn.dataset.mode : "level";
   if (mode === "calib") {
     const threshold = clampInt(el("calib-threshold").value, 2, 9, 4);
     const hardCount = clampInt(el("calib-count").value, 0, 30, 6);
@@ -58,8 +58,8 @@ function readConfig() {
       config: Object.assign({ numSequences: "random" }, calibrationConfig(hardCount)),
     };
   }
-  const sel = document.querySelector('input[name="level"]:checked');
-  const level = sel ? parseInt(sel.value, 10) : 3;
+  const sel = el("level-slider");
+  const level = sel ? clampInt(sel.value, 1, 6, 3) : 3;
   return {
     mode: "level", level,
     config: Object.assign({ numSequences: "random" }, LEVELS[level - 1].cfg),
@@ -195,14 +195,14 @@ function finishSearch() {
 
   const best = chosenBest();
   if (!best) {
-    el("error").textContent = `Kein lösbares Rätsel gefunden. Bitte „Neues Rätsel" erneut versuchen.`;
+    el("error").textContent = `Kein lösbares Rätsel gefunden. Bitte „Rätsel generieren" erneut versuchen.`;
     return;
   }
   if (calibMode) {
     if (best.hardCount !== calibN)
-      el("error").textContent = `Kein Rätsel mit ${calibN} harten Schritten (b≥${calibT}) gefunden — zeige das nächstliegende (${best.hardCount}). „Neues Rätsel" erneut versuchen oder Werte anpassen.`;
+      el("error").textContent = `Kein Rätsel mit ${calibN} harten Schritten (b≥${calibT}) gefunden — zeige das nächstliegende (${best.hardCount}). „Rätsel generieren" erneut versuchen oder Werte anpassen.`;
   } else if (best.level !== targetLevel) {
-    el("error").textContent = `Keine ${LEVELS[targetLevel - 1].name}-Stufe gefunden — zeige die nächstliegende (${LEVELS[best.level - 1].name}). „Neues Rätsel" erneut versuchen oder Stufe wechseln.`;
+    el("error").textContent = `Keine ${LEVELS[targetLevel - 1].name}-Stufe gefunden — zeige die nächstliegende (${LEVELS[best.level - 1].name}). „Rätsel generieren" erneut versuchen oder Stufe wechseln.`;
   }
   const code = encodePuzzle(best.clues);
   currentPuzzle = { grid: best.grid, clues: best.clues, code, clueCount: best.clueCount, trace: best.trace, level: best.level };
@@ -800,18 +800,38 @@ function toggleSteps() { if (stepMode) exitStepMode(); else enterStepMode(); }
 
 document.getElementById("generate-btn").addEventListener("click", newSearch);
 document.getElementById("accept-btn").addEventListener("click", acceptNow);
-// Mode switch: "Stufe" shows the level picker, "Kalibrierung" the raw b-threshold
-// + hard-step-count inputs. Exclusive — only one set is visible/used at a time.
+// Mode switch: "Stufe" shows the level slider, "Kalibrierung" the raw b-threshold
+// + hard-step-count inputs, "Editor" the manual-entry panel. Exclusive — only one
+// panel is visible/used at a time.
 function syncModeUI() {
-  const sel = document.querySelector('input[name="genmode"]:checked');
-  const calib = sel && sel.value === "calib";
-  el("difficulty-picker").hidden = calib;
-  el("calib-inputs").hidden = !calib;
-  el("hint-level").hidden = calib;
-  el("hint-calib").hidden = !calib;
+  const active = document.querySelector('#mode-picker button[aria-selected="true"]');
+  const mode = active ? active.dataset.mode : "level";
+  el("difficulty-picker").hidden = mode !== "level";
+  el("calib-inputs").hidden = mode !== "calib";
+  el("manual-entry").hidden = mode !== "manual";
+  el("hint-level").hidden = mode !== "level";
+  el("hint-calib").hidden = mode !== "calib";
+  // Im Editor-Modus lädt man per "Rätsel laden" (Button im Panel); der globale
+  // "Rätsel generieren"-Button passt dort nicht.
+  el("generate-btn").hidden = mode === "manual";
 }
-Array.prototype.forEach.call(document.querySelectorAll('input[name="genmode"]'), r => r.addEventListener("change", syncModeUI));
+// Modus-Tabs: den geklickten Tab als aria-selected markieren, dann die
+// mode-abhängige UI (Slider ↔ Kalibrier-Inputs) synchronisieren.
+function setMode(mode) {
+  Array.prototype.forEach.call(document.querySelectorAll('#mode-picker button'), b => {
+    b.setAttribute("aria-selected", b.dataset.mode === mode ? "true" : "false");
+  });
+  syncModeUI();
+}
+Array.prototype.forEach.call(document.querySelectorAll('#mode-picker button'), b => b.addEventListener("click", () => setMode(b.dataset.mode)));
 syncModeUI();
+// Difficulty slider: reflect the current level's name live as it's dragged.
+function syncLevelName() {
+  const lvl = clampInt(el("level-slider").value, 1, 6, 3);
+  el("level-name").textContent = LEVELS[lvl - 1].name;
+}
+el("level-slider").addEventListener("input", syncLevelName);
+syncLevelName();
 // Load a puzzle from a code: decode → solve → set as currentPuzzle and render.
 // Returns the grid on success, null on failure (with error message side-effect).
 function loadPuzzleFromCode(code, errPrefix) {
@@ -1019,8 +1039,6 @@ function loadManualPuzzle() {
   document.getElementById("print-btn").disabled = false;
   document.getElementById("steps-btn").disabled = false;
   document.getElementById("error").textContent = "";
-  // Collapse the entry panel — the puzzle is now loaded.
-  document.getElementById("manual-entry").open = false;
 }
 
 function clearManualFields() {
@@ -1035,15 +1053,8 @@ function clearManualFields() {
   document.getElementById("manual-error").textContent = "";
 }
 
-function loadManualExample() {
-  clearManualFields();
-  for (let r = 0; r < N; r++) document.getElementById("m-r-" + r).value = MANUAL_EXAMPLE.rows[r];
-  for (let c = 0; c < N; c++) document.getElementById("m-c-" + c).value = MANUAL_EXAMPLE.cols[c];
-}
-
 document.getElementById("manual-load-btn").addEventListener("click", loadManualPuzzle);
 document.getElementById("manual-clear-btn").addEventListener("click", clearManualFields);
-document.getElementById("manual-example-btn").addEventListener("click", loadManualExample);
 document.getElementById("syntax-help-btn").addEventListener("click", () => {
   const dlg = document.getElementById("syntax-dialog");
   if (typeof dlg.showModal === "function") dlg.showModal();
