@@ -123,7 +123,7 @@
   /* width:auto + padding:0 halten Picos globale `:where(table){width:100%}`
      und `:where(td){padding}` vom Grid fern. */
   table#grid { --cell: clamp(32px, 11.5vw, 64px); width: auto; border-collapse: collapse; margin: 1.2em auto 1em; }
-  table#grid th { width: var(--cell); height: var(--cell); padding: 0; font-size: calc(var(--cell) * 0.42); color: var(--accent); font-family: Georgia, serif; font-weight: bold; }
+  table#grid th { width: var(--cell); height: var(--cell); padding: 0; text-align: center; font-size: calc(var(--cell) * 0.42); color: var(--accent); font-family: Georgia, serif; font-weight: bold; }
   table#grid td { width: var(--cell); height: var(--cell); padding: 0; border: 1.5px solid #222; text-align: center; font-size: calc(var(--cell) * 0.42); vertical-align: middle; background: white; font-family: Georgia, serif; }
   /* Lösungsweg-Modus: Kandidaten als Pencil-Marks; etwas größere Zellen für Lesbarkeit. */
   table#grid.pencil { --cell: clamp(42px, 13vw, 72px); }
