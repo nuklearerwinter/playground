@@ -123,7 +123,9 @@
   /* width:auto + padding:0 halten Picos globale `:where(table){width:100%}`
      und `:where(td){padding}` vom Grid fern. */
   table#grid { --cell: clamp(32px, 11.5vw, 64px); width: auto; border-collapse: collapse; margin: 1.2em auto 1em; }
-  table#grid th { width: var(--cell); height: var(--cell); padding: 0; text-align: center; font-size: calc(var(--cell) * 0.42); color: var(--accent); font-family: Georgia, serif; font-weight: bold; }
+  /* border:0 — sonst gibt Pico den Headern einen hellen border-bottom, der im
+     border-collapse den dunklen Oberrand der ersten Zellreihe verdeckt. */
+  table#grid th { width: var(--cell); height: var(--cell); padding: 0; border: 0; text-align: center; font-size: calc(var(--cell) * 0.42); color: var(--accent); font-family: Georgia, serif; font-weight: bold; }
   table#grid td { width: var(--cell); height: var(--cell); padding: 0; border: 1.5px solid #222; text-align: center; font-size: calc(var(--cell) * 0.42); vertical-align: middle; background: white; font-family: Georgia, serif; }
   /* Lösungsweg-Modus: Kandidaten als Pencil-Marks; etwas größere Zellen für Lesbarkeit. */
   table#grid.pencil { --cell: clamp(42px, 13vw, 72px); }
@@ -225,7 +227,10 @@
   .step-panel[hidden] { display: none; }
   .step-controls { display: flex; flex-wrap: wrap; gap: 0.3em; align-items: center; padding: 0.2em 0.1em; border-bottom: 1px solid #eee; }
   .step-controls[hidden] { display: none; }
-  .step-controls button { padding: 0.4em 0.75em; font-size: 0.92em; min-height: 2.15em; margin: 0; }
+  /* Icon-only Navigation: kompakt, gleich breite Tasten; SVG-Icons statt
+     Emoji-Glyphen (plattformunabhängig monochrom, kein Emoji-Hintergrund). */
+  .step-controls button { padding: 0.4em 0.6em; line-height: 0; min-height: 2.15em; min-width: 2.5em; margin: 0; }
+  .step-controls button svg { width: 18px; height: 18px; fill: currentColor; display: block; }
   .step-controls #step-counter { margin-left: auto; color: #555; font-size: 0.88em; padding: 0 0.3em; }
   .step-controls { display: flex; flex-wrap: wrap; gap: 0.4em; align-items: center; margin: 0.2em 0 0.6em; }
   .step-controls[hidden] { display: none; }
@@ -390,10 +395,11 @@
       <table id="grid"></table>
       <div class="step-panel" id="step-panel" hidden>
         <div class="step-controls" id="step-controls">
-          <button id="step-prev">‹ Zurück</button>
-          <button id="step-play">▶ Abspielen</button>
-          <button id="step-next">Weiter ›</button>
-          <button id="step-reset">↺ Zurücksetzen</button>
+          <button id="step-reset" title="Zum Anfang" aria-label="Zum Anfang"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5L5 19L8 19L8 5ZM20 5L20 19L9 12Z"/></svg></button>
+          <button id="step-prev-hard" title="Zurück zum vorherigen Schritt mit B > 1" aria-label="Vorheriger Schritt mit B größer 1"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 5L21 19L12 12ZM12 5L12 19L3 12Z"/></svg></button>
+          <button id="step-prev" title="Ein Schritt zurück" aria-label="Ein Schritt zurück"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 5L16 19L7 12Z"/></svg></button>
+          <button id="step-next" title="Ein Schritt weiter" aria-label="Ein Schritt weiter"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5L8 19L17 12Z"/></svg></button>
+          <button id="step-next-hard" title="Vor zum nächsten Schritt mit B > 1" aria-label="Nächster Schritt mit B größer 1"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5L3 19L12 12ZM12 5L12 19L21 12Z"/></svg></button>
           <span id="step-counter"></span>
         </div>
         <ol id="step-list"></ol>

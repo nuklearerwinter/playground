@@ -452,7 +452,7 @@ function hideSolution() {
 
 
 // === Lösungsweg: Schritt-Modus (UI) ===
-let stepMode = false, stepTrace = null, stepIndex = 0, stepTimer = null;
+let stepMode = false, stepTrace = null, stepIndex = 0;
 
 function gridsMatch(a, b) {
   for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) if (a[r][c] !== b[r][c]) return false;
@@ -765,26 +765,30 @@ function renderStep() {
   el("step-counter").textContent = `Schritt ${stepIndex} / ${stepTrace.steps.length}`;
   el("step-prev").disabled = stepIndex <= 0;
   el("step-next").disabled = stepIndex >= stepTrace.steps.length;
+  el("step-reset").disabled = stepIndex <= 0;
+  const steps = stepTrace.steps;
+  el("step-prev-hard").disabled = !steps.slice(0, Math.max(0, stepIndex - 1)).some(isNontrivial);
+  el("step-next-hard").disabled = !steps.slice(stepIndex).some(isNontrivial);
 }
-function stepNext() { if (stepTrace && stepIndex < stepTrace.steps.length) { stepIndex++; renderStep(); } if (stepTrace && stepIndex >= stepTrace.steps.length) stopPlay(); }
+function stepNext() { if (stepTrace && stepIndex < stepTrace.steps.length) { stepIndex++; renderStep(); } }
 function stepPrev() { if (stepTrace && stepIndex > 0) { stepIndex--; renderStep(); } }
-function stepReset() { stopPlay(); stepIndex = 0; renderStep(); }
-function startPlay() {
-  if (stepTimer || !stepTrace) return;
-  if (stepIndex >= stepTrace.steps.length) stepIndex = 0;
-  el("step-play").textContent = "⏸ Pause";
-  stepTimer = setInterval(() => {
-    if (!stepTrace || stepIndex >= stepTrace.steps.length) { stopPlay(); return; }
-    stepIndex++; renderStep();
-  }, 400);
+function stepReset() { stepIndex = 0; renderStep(); }
+// Skip targets: any step that wasn't outright forced (b > 1) — i.e. where the
+// player has to weigh more than one option (b = 1 steps are pure propagation).
+function isNontrivial(s) { return (s.b || 1) > 1; }
+function stepNextHard() {
+  if (!stepTrace) return;
+  for (let i = stepIndex; i < stepTrace.steps.length; i++) {
+    if (isNontrivial(stepTrace.steps[i])) { stepIndex = i + 1; renderStep(); return; }
+  }
 }
-function stopPlay() {
-  if (stepTimer) { clearInterval(stepTimer); stepTimer = null; }
-  const b = document.getElementById("step-play"); if (b) b.textContent = "▶ Abspielen";
+function stepPrevHard() {
+  if (!stepTrace) return;
+  for (let i = stepIndex - 2; i >= 0; i--) {
+    if (isNontrivial(stepTrace.steps[i])) { stepIndex = i + 1; renderStep(); return; }
+  }
 }
-function togglePlay() { if (stepTimer) stopPlay(); else startPlay(); }
 function exitStepMode() {
-  stopPlay();
   stepMode = false; stepTrace = null; stepIndex = 0;
   const panel = document.getElementById("step-panel"); if (panel) panel.hidden = true;
   const stepsBtn = document.getElementById("steps-btn"); if (stepsBtn) stepsBtn.textContent = "Lösungsweg";
@@ -1068,11 +1072,12 @@ document.getElementById("steps-btn").addEventListener("click", toggleSteps);
 document.getElementById("step-prev").addEventListener("click", stepPrev);
 document.getElementById("step-next").addEventListener("click", stepNext);
 document.getElementById("step-reset").addEventListener("click", stepReset);
-document.getElementById("step-play").addEventListener("click", togglePlay);
+document.getElementById("step-prev-hard").addEventListener("click", stepPrevHard);
+document.getElementById("step-next-hard").addEventListener("click", stepNextHard);
 document.getElementById("step-list").addEventListener("click", (e) => {
   const li = e.target.closest("li"); if (!li) return;
   const k = parseInt(li.dataset.step, 10); if (!k) return;
-  stopPlay(); stepIndex = k; renderStep();
+  stepIndex = k; renderStep();
 });
 
 // If URL contains ?code=…, auto-fill the input and load the puzzle.
