@@ -110,10 +110,10 @@
   #progress[hidden] { display: none; }
   #progress span { font-size: 0.9em; }
   #puzzle[hidden] { display: none; }
-  #progress-bar { width: min(220px, 100%); height: 0.9em; appearance: none; -webkit-appearance: none; border: 1px solid #bbb; border-radius: 4px; overflow: hidden; background: #eee; }
-  #progress-bar::-webkit-progress-bar { background: #eee; }
-  #progress-bar::-webkit-progress-value { background: var(--accent); transition: width 0.08s linear; }
-  #progress-bar::-moz-progress-bar { background: var(--accent); }
+  /* Pico stylt <progress> nativ (Akzentfarbe = --pico-primary, hier Teal).
+     Wir setzen nur die Breite, damit der Balken kompakt neben dem Status-Text
+     bleibt, und nehmen Picos Default-Block-Margin raus. */
+  #progress-bar { width: min(220px, 100%); margin: 0; }
   .hints h3 { margin: 0.6em 0 0.3em; font-size: 1.05em; color: #333; }
   .hints ol { list-style: none; padding-left: 0.2em; margin: 0 0 0.6em; }
   .hints li { margin: 0.2em 0; line-height: 1.45; }
