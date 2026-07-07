@@ -22,12 +22,21 @@ Hinweistypen, die der Generator erzeugt:
 | Typ            | Beispieltext                                                         |
 |----------------|----------------------------------------------------------------------|
 | `duplicate`    | „Die 5 kommt doppelt vor."                                           |
+| `once`         | „Die 5 kommt genau einmal vor."                                      |
+| `absent`       | „Die 5 kommt nicht vor."                                             |
 | `pairSum`      | „A3 plus A4 ergibt 11."                                              |
 | `totalSum`     | „Die Summe aller sechs Zahlen lautet 38."                            |
 | `directSequence`   | „… direkt aufsteigend angeordnet (lückenlos, z. B. 3-4-5-6-7-8)."  |
 | `directDescending` | „… direkt absteigend angeordnet (lückenlos, z. B. 8-7-6-5-4-3)."   |
 | `ascending`        | „… aufsteigend angeordnet (ggf. mit Lücken)."                      |
 | `descending`       | „… absteigend angeordnet (ggf. mit Lücken)."                       |
+
+`duplicate` ist strukturell (ohne den Hinweis gälte die Linie als „alle
+verschieden") und daher immer mandatory. `once` und `absent` sind dagegen
+**reine Zusatzinformation**: `once` fügt nur die Untergrenze „kommt vor" hinzu
+(höchstens einmal gilt ohnehin), `absent` streicht den Wert komplett aus der
+Linie. Pro (Linie, Wert) ist höchstens einer von `duplicate`/`once`/`absent`
+zulässig; mehrere `once`/`absent` mit verschiedenen Werten pro Linie sind ok.
 
 ## Architektur
 
@@ -107,10 +116,17 @@ Pro Durchlauf werden angewandt:
 - **Naked Singles + Adjazenz**: Eine fix bestimmte Zelle verbietet ihren
   Wert in den vier H/V-Nachbarn.
 - **Zeilen-/Spalten-Distinktheit**: Pro Reihe/Spalte gilt jeder Wert höchstens
-  einmal (Obergrenze). Eine **untere** Schranke gibt es pro Linie nur für den
-  Dopplungs-Wert (genau zweimal) — daraus folgt für ihn auch ein „Hidden
-  Single". Achtung: Eine 6er-Linie enthält nur 6 der 9 Werte, es gibt also
+  einmal (Obergrenze). Eine **untere** Schranke gibt es pro Linie nur für
+  explizit benannte Werte: den Dopplungs-Wert (genau zweimal) und einen
+  `once`-Wert (genau einmal) — daraus folgt für beide auch ein „Hidden
+  Single" (0 mögliche Plätze ⇒ Widerspruch, genau so viele Plätze wie nötig ⇒
+  erzwungen). Achtung: Eine 6er-Linie enthält nur 6 der 9 Werte, es gibt also
   **keine** Sudoku-artige „jeder Wert kommt vor"-Schranke.
+- **Absent-Streichung**: Ein `absent`-Hinweis („kommt nicht vor") streicht den
+  Wert einmalig aus allen sechs Zellen der Linie — vor der Fixpunkt-Schleife,
+  da Domains nur schrumpfen. Danach trägt er nichts mehr bei (insbesondere
+  braucht eine reine absent-Linie **keine** Feasibility-DFS: der Wert ist
+  schon aus den Domains verschwunden).
 - **Globale Anzahl**: Jeder Wert kommt genau 4× im Gitter vor (Ober- und
   Unterschranke über alle 36 Zellen).
 - **pairSum-Bogenkonsistenz**: Für `A + B = s` behält jede der beiden Zellen
@@ -138,7 +154,13 @@ Pro Durchlauf werden angewandt:
 - **Linien-Feasibility-DFS**: Für jede Linie mit Summe und/oder Duplikat zählt
   eine DFS alle gültigen 6-Wert-Belegungen auf; Werte ohne Vorkommen werden
   gestrichen. Fängt extreme Summen + komplexere Duplikat-Fälle ab, die
-  `dupPlacement` nicht löst.
+  `dupPlacement` nicht löst. Trägt die Linie zusätzlich `once`-Werte, erzwingt
+  der Final-Check der DFS `usage[v] === 1` für sie (sound: Belegungen ohne den
+  Wert sind keine echten Vervollständigungen). **Ein `once`/`absent`-Hinweis
+  allein macht eine Linie aber NICHT zur DFS-Linie** — absent steckt schon in
+  den Domains, und für once ist der Hidden Single die menschlich angemessene
+  Deduktion; eine Enumeration einer sonst freien Linie hätte hunderte
+  Kombinationen und würde die `b`-basierte Schwierigkeitsmessung sprengen.
 - **Sequenzen**: `directSequence` propagiert `Zelle[k+1] = Zelle[k] + 1`
   (Domain per `<<1`); `directDescending` analog `Zelle[k+1] = Zelle[k] - 1`
   (Domain per `>>1`); `ascending` / `descending` propagieren die
@@ -158,6 +180,14 @@ Schwierigkeitssteuerung übernimmt das Zeit-Turnier (siehe unten).
    anwendbaren Hinweise (1 duplicate bei Dopplung, alle pairSum, 1 totalSum,
    ggf. 1 Sequenz) ins Set gelegt — ~70–78 Hinweise. **Gate**: wenn schon
    dieses Maximalset nicht deduzierbar ist (`logicalSolve`), Gitter verwerfen.
+   `once`/`absent`-Kandidaten (jeder einfach bzw. gar nicht vorkommende Wert,
+   ~9 pro Linie) erzeugt `buildCandidateClues` zwar alle, aber `pickClues`
+   wählt **vor** dem Gate eine kleine Zufallsteilmenge (je 0..`maxOnceClues` /
+   0..`maxAbsentClues` aus der Level-cfg, höchstens einer je Art und Linie),
+   markiert sie `keep` und wirft den Rest komplett raus. Sie alle
+   mitzuminimieren würde die Kandidatenzahl ~verdoppeln (Minimierungszeit ×2);
+   so kosten sie fast nichts, erscheinen garantiert im Ergebnis und die
+   Minimierung stützt sich auf sie — sie werden organisch tragend.
 2. **Phase 1 — maximal reduzieren**: In mehreren Durchläufen wird jeder
    entfernbare Hinweis probeweise gelöscht und nur dann entfernt, wenn das
    Rätsel deduzierbar bleibt. Reihenfolge: vollste Linien zuerst (das ebnet
@@ -171,8 +201,10 @@ Schwierigkeitssteuerung übernimmt das Zeit-Turnier (siehe unten).
    Hinweis-Zielwert.
 4. **Σ-Cap**: Höchstens 5 totalSum-Hinweise (greift nur, wenn Phase 2 welche
    zurückgelegt hätte).
-5. **Anzeige-Sortierung** pro Linie: duplicate, Sequenz, pairSums
-   (positionsweise), totalSum.
+5. **Anzeige-Sortierung** pro Linie: duplicate, once (nach Wert), absent
+   (nach Wert), Sequenz, pairSums (positionsweise), totalSum — kanonisch in
+   `clueDisplayRank` (Hauptthread; `displayRank` im Worker spiegelt sie, da
+   getrennter Realm).
 
 Da jede Entfernung über `logicalSolve` geprüft wird, ist jedes Ergebnis ohne
 Raten lösbar. Ein einzelner Reduktionslauf landet in *einem* lokalen Minimum
@@ -188,7 +220,9 @@ Der Empfänger rekonstruiert die Lösung lokal aus den Clues per
 
 Bit-Layout (`encodePuzzle` / `decodePuzzle`):
 
-- 4 Bit Version (0)
+- 4 Bit Version (0 oder 1; **1 nur wenn once/absent-Hinweise vorhanden sind** —
+  Rätsel ohne sie behalten byte-identische v0-Codes, die auch ältere Stände
+  der Seite noch decodieren)
 - **pairSum**: 60-Bit-Bitmap (Indizes 0..29 = horizontale Paare zeilenmajor,
   30..59 = vertikale Paare spaltenmajor) + 4 Bit pro gesetztem Bit für den
   Summenwert (3..17 → 0..14)
@@ -197,10 +231,17 @@ Bit-Layout (`encodePuzzle` / `decodePuzzle`):
 - **duplicate**: 12-Bit-Bitmap + 4 Bit pro gesetztem Bit (1..9 → 0..8)
 - **sequence**: 12-Bit-Bitmap + 2 Bit pro gesetztem Bit
   (0=directSequence, 1=ascending, 2=descending, 3=directDescending)
+- **[nur v1] once**: 12-Bit-Linien-Bitmap + 9-Bit-Wertmaske pro gesetzter
+  Linie (Bit k = Wert k+1) — erlaubt mehrere once-Werte pro Linie,
+  ordnungsunabhängig/kanonisch
+- **[nur v1] absent**: 12-Bit-Linien-Bitmap + 9-Bit-Wertmaske, gleiche Form
 - 8 Bit Prüfsumme (Summe aller vorigen Daten-Bytes mod 256)
 
-Gesamtlänge 152–200 Bit ≙ **31–42 Base32-Zeichen** je nach Hinweisdichte
-(Median ~37 bei Default-Einstellungen). Beim Eingabefeld werden
+`decodePuzzle` akzeptiert Version 0 **und** 1 und lehnt widersprüchliche
+Zähl-Hinweise ab (dup∩(once|absent) oder once∩absent auf einer Linie ⇒ null;
+ebenso eine geflaggte Linie mit leerer Wertmaske). Gesamtlänge 152–200 Bit
+(v0) ≙ **31–42 Base32-Zeichen** je nach Hinweisdichte (Median ~37 bei
+Default-Einstellungen; v1 entsprechend länger). Beim Eingabefeld werden
 Kleinbuchstaben, Bindestriche und Leerzeichen toleriert. Ungültige Codes
 werden über die Prüfsumme erkannt.
 
@@ -219,7 +260,11 @@ offensichtlichen Folgen jeder frisch gesetzten Zelle sofort ab — erst Adjazenz
 dann Reihen-/Spalten-Distinktheit — und zwar vollständig, *vor* und *nach* jeder
 schwereren Batch-Regel. Eine **lückenlose Sequenz** wird ab einer einzigen
 bekannten Zelle in **einem gebündelten `"sequence"`-Schritt** komplett gefüllt
-(`fillDirectSequence`). Das ist zulässig, weil die Propagation konfluent/monoton
+(`fillDirectSequence`). **`absent`-Hinweise stehen als je ein `"absent"`-Schritt
+ganz am Anfang des Trace** (b=1, „Die 5 kommt in Reihe C nicht vor — aus allen
+sechs Zellen streichen"), so wie ein Mensch das Gitter vorbereiten würde; der
+**once-Hidden-Single** erscheint als `"once-hidden-row"/"once-hidden-col"`-Schritt
+(b=1) in `unit`. Das ist zulässig, weil die Propagation konfluent/monoton
 ist (gleicher Fixpunkt, egal in welcher Reihenfolge) — `logicalSolve` (das
 Akzeptanz-Gate) bleibt unverändert.
 
@@ -278,16 +323,23 @@ einen *echten* ≥3-Kombinationen-Survey erzwangen):
   Deduktionen (Fixture `0WH0` = maxB 7 / nFeas 8 / nFeasHard 1) **Schwer, nicht
   Sehr schwer** — seine 8 Linien lösen sich überwiegend bei b≤2.
 - **Hinweistyp-Boden** (`clueFeatures` liest die *Clue-Menge*, nicht den Trace):
-  Liniensumme vorhanden ⇒ ≥ Mittel; Duplikat vorhanden ⇒ ≥ Leicht.
+  Liniensumme vorhanden ⇒ ≥ Mittel; Duplikat oder `once` vorhanden ⇒ ≥ Leicht.
+  `absent` setzt bewusst **keinen** Boden (eine Sofort-Streichung ist trivial —
+  L1 darf absent-Hinweise tragen).
 Trefferquoten ≈ 100/97/74/28/34 %; L4 bleibt der Schwachpunkt (seine Config
 streut die Hard-Survey-Zahl über L3–L5).
 
 `LEVELS` trägt pro Stufe eine Generier-`cfg` (`minTotalSum`, `maxTotalSum`,
-`minDupLines`, `maxDupLines`, `fewerPairSums`), die die Generierung **ins Band
-biast** (L1: keine Summen/Dups ⇒ `maxB=1`; L5: `minTotalSum:3` für große
-Enumerationen). Die `cfg` ist nur ein Bias — die eigentliche Einstufung macht
-`puzzleLevel`. **`fewerPairSums:true` vermeiden** (senkt die Yield ~10× — daher
-eskaliert L5 über `minTotalSum` statt darüber).
+`minDupLines`, `maxDupLines`, `fewerPairSums`, `maxOnceClues`,
+`maxAbsentClues`), die die Generierung **ins Band biast** (L1: keine
+Summen/Dups ⇒ `maxB=1`; L5: `minTotalSum:3` für große Enumerationen).
+`maxOnceClues`/`maxAbsentClues` deckeln die keep-geschützte
+once/absent-Zufallsauswahl in `pickClues`; **L1 hat `maxOnceClues: 0`** (ein
+once-Hinweis floort auf Stufe 2 und würde jede L1-Kandidatur aus dem Band
+schieben), absent bleibt auch auf L1 erlaubt. Die `cfg` ist nur ein Bias —
+die eigentliche Einstufung macht `puzzleLevel`. **`fewerPairSums:true`
+vermeiden** (senkt die Yield ~10× — daher eskaliert L5 über `minTotalSum`
+statt darüber).
 
 **Turnier trifft ein Band, maximiert nicht** (`startSearch` / `onWorkerMessage`
 / `searchTick` / `finishSearch`):
@@ -334,11 +386,18 @@ beliebig, Groß-/Kleinschreibung egal.
 |-------------------------------------|--------------------------------------------------|----------------|
 | Paarsumme                           | `Zelle+Zelle=Wert` (voll qualifiziert)           | `A3+A4=11`     |
 | Gesamtsumme der Linie               | `SUM=Wert` (auch `Σ=Wert`)                       | `SUM=29`       |
-| Doppelte Zahl                       | `Wertx2`, `Wertx`, `2xWert` oder `Wert²`         | `5x2` / `5²`   |
+| Doppelte Zahl                       | `Wertx2`, `Wertx`, `Wert²` (Legacy: `2xWert` nur für Wert ≥ 3) | `5x2` / `5²`   |
+| Zahl genau einmal                   | `Wertx1`                                         | `5x1`          |
+| Zahl kommt nicht vor                | `Wertx0`                                         | `5x0`          |
 | Direkt aufsteigend (lückenlos)      | `RUN ASC`                                        | `RUN ASC`      |
 | Direkt absteigend (lückenlos)       | `RUN DESC`                                       | `RUN DESC`     |
 | Aufsteigend mit Lücken              | `ASC`                                            | `ASC`          |
 | Absteigend mit Lücken               | `DESC`                                           | `DESC`         |
+
+Zähl-Hinweise lesen sich **Wert-zuerst**: in `AxB` mit `B ∈ {0,1,2}` ist `A`
+der Wert und `B` die Anzahl. Die Legacy-Form `AnzahlxWert` überlebt nur als
+`2xB` mit `B ≥ 3` (eindeutig). **Bewusster Bruch:** das früher gültige `2x1`
+(„die 1 doppelt") bedeutet jetzt „die 2 genau einmal".
 
 ### Validierung (`parseManualLine` → `loadManualPuzzle`)
 
@@ -346,8 +405,10 @@ beliebig, Groß-/Kleinschreibung egal.
 - Paarzellen müssen beide im aktuellen Linienkontext liegen
   (Reihe-A-Feld → beide Zellen mit `A…`; Spalte-3-Feld → beide Zellen
   mit `…3`).
-- Wertebereiche: pairSum 3–17, totalSum 6–54, duplicate 1–9.
-- Pro Linie höchstens eine totalSum / ein Duplikat / eine Sequenz.
+- Wertebereiche: pairSum 3–17, totalSum 6–54, duplicate/once/absent 1–9.
+- Pro Linie höchstens eine totalSum / ein Duplikat / eine Sequenz. Mehrere
+  once/absent pro Linie sind erlaubt, aber pro **Wert** höchstens einer von
+  `Vx0`/`Vx1`/`Vx2` (Widerspruchs-Check).
 - Alle Feldfehler werden gesammelt und gemeinsam angezeigt; betroffene
   Inputs bekommen die Klasse `field-bad`.
 

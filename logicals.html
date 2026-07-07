@@ -428,7 +428,9 @@
       <tbody>
         <tr><td>Paarsumme</td><td><code>Zelle+Zelle=Wert</code></td><td><code>A3+A4=11</code></td></tr>
         <tr><td>Gesamtsumme</td><td><code>SUM=Wert</code></td><td><code>SUM=29</code></td></tr>
-        <tr><td>Doppelte Zahl</td><td><code>WertxAnzahl</code>, <code>Wertx</code>, <code>AnzahlxWert</code> oder <code>Wert²</code></td><td><code>5x2</code>, <code>5x</code>, <code>2x5</code>, <code>5²</code></td></tr>
+        <tr><td>Doppelte Zahl</td><td><code>Wertx2</code>, <code>Wertx</code> oder <code>Wert²</code> (auch <code>2xWert</code> für Wert&nbsp;≥&nbsp;3)</td><td><code>5x2</code>, <code>5x</code>, <code>2x5</code>, <code>5²</code></td></tr>
+        <tr><td>Zahl genau einmal</td><td><code>Wertx1</code></td><td><code>5x1</code></td></tr>
+        <tr><td>Zahl kommt nicht vor</td><td><code>Wertx0</code></td><td><code>5x0</code></td></tr>
         <tr><td>Direkt aufsteigend (lückenlos)</td><td><code>RUN ASC</code></td><td><code>RUN ASC</code></td></tr>
         <tr><td>Direkt absteigend (lückenlos)</td><td><code>RUN DESC</code></td><td><code>RUN DESC</code></td></tr>
         <tr><td>Aufsteigend (mit Lücken)</td><td><code>ASC</code></td><td><code>ASC</code></td></tr>
@@ -438,6 +440,7 @@
     <ul class="syntax-notes">
       <li>Mehrere Hinweise pro Linie mit <code>;</code> oder <code>,</code> trennen. Leerzeichen sind beliebig, Groß-/Kleinschreibung egal.</li>
       <li><b>Paarzellen</b> müssen beide in der aktuellen Linie liegen und orthogonal benachbart sein. Im Reihe-A-Feld sind also nur <code>A?+A?</code>-Paare gültig, im Spalte-3-Feld nur <code>?3+?3</code>.</li>
+      <li>Bei <b>Zähl-Hinweisen</b> steht der Wert zuerst: <code>5x0</code>/<code>5x1</code>/<code>5x2</code>. <code>2x1</code> heißt also „die 2 kommt genau einmal vor". Mehrere Zähl-Hinweise pro Linie sind erlaubt (z.&nbsp;B. <code>5x0; 7x1</code>), aber höchstens einer je Wert.</li>
       <li>Bei <b>RUN/ASC/DESC</b> und <b>SUM</b> ist die Linie bereits durch das Feld gegeben — also kein Argument für die Linie nötig.</li>
       <li>Felder, in denen die Linie keinen Hinweis hat, einfach leer lassen.</li>
     </ul>

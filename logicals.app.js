@@ -332,6 +332,8 @@ function fmtClueForInput(cl) {
   switch (cl.type) {
     case "totalSum":         return `SUM=${cl.value}`;
     case "duplicate":        return `${cl.value}x2`;
+    case "once":             return `${cl.value}x1`;
+    case "absent":           return `${cl.value}x0`;
     case "directSequence":   return "RUN ASC";
     case "directDescending": return "RUN DESC";
     case "ascending":        return "ASC";
@@ -425,11 +427,15 @@ function decorateGrid(p) {
       case "descending":
         return `<span class="rb seq" title="absteigend (mit Lücken erlaubt)">${cl.scope === "row" ? ICON.dotL : ICON.dotU}</span>`;
       case "duplicate":  return `<span class="rb dup" title="Zahl kommt doppelt vor"><b>${cl.value}</b><sup>×2</sup></span>`;
+      case "once":       return `<span class="rb dup once" title="Zahl kommt genau einmal vor"><b>${cl.value}</b><sup>×1</sup></span>`;
+      case "absent":     return `<span class="rb dup abs" title="Zahl kommt nicht vor"><b>${cl.value}</b><sup>×0</sup></span>`;
       default: return "";
     }
   }
   function chipsFor(list) {
-    const order = { duplicate: 0, totalSum: 1, directSequence: 2, directDescending: 2, ascending: 2, descending: 2 };
+    // NB: types missing from this map are silently dropped — every renderable
+    // clue type must be listed here.
+    const order = { duplicate: 0, once: 1, absent: 2, totalSum: 3, directSequence: 4, directDescending: 4, ascending: 4, descending: 4 };
     return list.filter(cl => cl.type in order).slice().sort((a, b) => order[a.type] - order[b.type]).map(chipHtml).join("");
   }
   for (let r = 0; r < N; r++) {
@@ -510,13 +516,14 @@ function clueHeadHtml(step) {
       return `<span class="chip sum"><b>Σ ${scopeLabel(cl)} = ${cl.value}</b> · Summenschranke</span>`;
     case "lineFeasibility": {
       // This rule fuses EVERY constraint on the line — name all that are active
-      // (totalSum and/or the duplicate value), not just one, so the head isn't
-      // misleading. (The candidate state it works on also reflects earlier
-      // deductions from crossing clues; those aren't repeated here.)
+      // (totalSum, the duplicate value and/or once values), not just one, so the
+      // head isn't misleading. (The candidate state it works on also reflects
+      // earlier deductions from crossing clues; those aren't repeated here.)
       let dv = 0; if (cl.dupMask) for (let v = 1; v <= 9; v++) if (cl.dupMask & (1 << (v - 1))) dv = v;
       const parts = [];
       if (cl.value >= 0) parts.push(`Σ ${scopeLabel(cl)} = ${cl.value}`);
       if (dv) parts.push(cl.value >= 0 ? `${dv} doppelt` : `${scopeLabel(cl)} · ${dv} doppelt`);
+      if (cl.onceMask) for (let v = 1; v <= 9; v++) if (cl.onceMask & (1 << (v - 1))) parts.push(`${v} genau 1×`);
       if (!parts.length) parts.push(scopeLabel(cl));
       return `<span class="chip ${cl.value >= 0 ? "sum" : "dup"}"><b>${parts.join(" · ")}</b> · zulässige Belegungen</span>`;
     }
@@ -532,6 +539,11 @@ function clueHeadHtml(step) {
     case "dup-hidden-row":
     case "dup-hidden-col":
       return `<span class="chip dup">doppelte <b>${cl.value}</b> in ${cl.label}</span>`;
+    case "once-hidden-row":
+    case "once-hidden-col":
+      return `<span class="chip dup">einmalige <b>${cl.value}</b> in ${cl.label}</span>`;
+    case "absent":
+      return `<span class="chip dup">keine <b>${cl.value}</b> in ${cl.label}</span>`;
     case "dup-place":
       return `<span class="chip dup"><b>${cl.value} doppelt in ${scopeLabel(cl)}</b> · Platzierung</span>`;
     case "naked-pair":
@@ -597,13 +609,15 @@ function combosHtmlForStep(step, dom) {
   if (step.ruleType === "lineFeasibility") {
     // Enumerate up to `cap` complete feasible 6-tuples for this line:
     // six distinct values from 1..9, except the duplicate value (if any in
-    // dupMask) appears exactly twice at non-adjacent positions; if cl.value
-    // (the totalSum target) is >= 0, the sum must match.
+    // dupMask) appears exactly twice at non-adjacent positions and each once
+    // value (onceMask) exactly once; if cl.value (the totalSum target) is
+    // >= 0, the sum must match. Mirrors the solver DFS (third copy!).
     const cells = cl.cells;
     if (!cells || cells.length !== 6) return null;
     const doms = cells.map(idx => dom[idx]);
     const target = (typeof cl.value === "number") ? cl.value : -1;
     const dupMask = cl.dupMask | 0;
+    const onceMask = cl.onceMask | 0;
     // List distinct value-COMBINATIONS (multisets), not ordered assignments —
     // matches the B metric (combos.size in solveWithTrace) and how a person
     // surveys the line. Dedup orderings via a sorted-key set.
@@ -614,7 +628,11 @@ function combosHtmlForStep(step, dom) {
       if (out.length >= cap) return;
       if (i === 6) {
         if (target >= 0 && sumSoFar !== target) return;
-        for (let v = 1; v <= 9; v++) if ((dupMask & (1 << (v - 1))) && usage[v] !== 2) return;
+        for (let v = 1; v <= 9; v++) {
+          const b = 1 << (v - 1);
+          if ((dupMask & b) && usage[v] !== 2) return;
+          if ((onceMask & b) && usage[v] !== 1) return;
+        }
         const sorted = assigned.slice().sort((a, b) => a - b), key = sorted.join(",");
         if (!seenCombo.has(key)) { seenCombo.add(key); out.push(sorted); }
         return;
@@ -913,7 +931,8 @@ function parseManualClue(raw, kind, idx) {
     if (value < 6 || value > 54) return { error: `Gesamtsumme ${value} außerhalb von 6–54` };
     return { clue: { type: "totalSum", scope: kind, index: idx, value } };
   }
-  // Duplicate: 5x2 / 5x / 2x5 / 5²
+  // Count clues: 5x2 (duplicate) / 5x1 (exactly once) / 5x0 (absent),
+  // legacy forms 5x / 5² (duplicate) and 2x5 (count-first duplicate).
   m = s.match(/^(\d)\s*²$/) || s.match(/^(\d)\s*[X×]\s*$/);
   if (m) {
     const value = parseInt(m[1], 10);
@@ -923,14 +942,17 @@ function parseManualClue(raw, kind, idx) {
   m = s.match(/^(\d)\s*[X×]\s*(\d)$/);
   if (m) {
     const a = parseInt(m[1], 10), b = parseInt(m[2], 10);
-    // One of them must be 2 (the count); the other is the value (1..9, anything but 2 wins;
-    // if both are 2, value = 2). This matches the natural readings "5x2" and "2x5".
-    let value;
-    if (a === 2 && b !== 2) value = b;
-    else if (b === 2 && a !== 2) value = a;
-    else if (a === 2 && b === 2) value = 2;
-    else return { error: `Duplikat braucht Anzahl 2: ${raw.trim()}` };
-    return { clue: { type: "duplicate", scope: kind, index: idx, value } };
+    // Value first: AxB with B ∈ {0,1,2} means "value A appears B times".
+    // (This deliberately re-reads the previously valid "2x1" as "once 2", not
+    // "dup 1".) The legacy count-first form AnzahlxWert survives only as 2xB
+    // with B ≥ 3, where it is unambiguous.
+    if (b <= 2) {
+      if (a < 1 || a > 9) return { error: `Ziffer ${a} außerhalb von 1–9` };
+      const type = b === 2 ? "duplicate" : b === 1 ? "once" : "absent";
+      return { clue: { type, scope: kind, index: idx, value: a } };
+    }
+    if (a === 2) return { clue: { type: "duplicate", scope: kind, index: idx, value: b } };
+    return { error: `Anzahl ${b} ungültig — erlaubt sind Wertx0 (kommt nicht vor), Wertx1 (genau einmal), Wertx2 (doppelt) oder die Legacy-Form 2xWert` };
   }
   // Sequences
   if (/^RUN\s+ASC$/.test(s)) return { clue: { type: "directSequence", scope: kind, index: idx } };
@@ -951,15 +973,25 @@ function parseManualLine(text, kind, idx) {
     clues.push(parsed.clue);
   }
   // Line-level uniqueness: at most one totalSum/duplicate/sequence per line.
+  // (once/absent are NOT sequences — several per line are fine, see below.)
   const counts = { totalSum: 0, duplicate: 0, sequence: 0 };
   for (const cl of clues) {
     if (cl.type === "totalSum") counts.totalSum++;
     else if (cl.type === "duplicate") counts.duplicate++;
-    else if (cl.type !== "pairSum") counts.sequence++;
+    else if (cl.type !== "pairSum" && cl.type !== "once" && cl.type !== "absent") counts.sequence++;
   }
   if (counts.totalSum > 1) errors.push("mehrere SUM-Hinweise — höchstens einer pro Linie");
   if (counts.duplicate > 1) errors.push("mehrere Duplikat-Hinweise — höchstens einer pro Linie");
   if (counts.sequence > 1) errors.push("mehrere Sequenz-Hinweise — höchstens einer pro Linie");
+  // Count clues about the same value contradict each other (or repeat):
+  // at most one of Vx0 / Vx1 / Vx2 per value and line.
+  const countByValue = new Map();
+  for (const cl of clues) {
+    if (cl.type !== "duplicate" && cl.type !== "once" && cl.type !== "absent") continue;
+    countByValue.set(cl.value, (countByValue.get(cl.value) || 0) + 1);
+  }
+  for (const [v, n] of countByValue) if (n > 1)
+    errors.push(`widersprüchliche Hinweise zur ${v} — höchstens einer von ${v}x0 / ${v}x1 / ${v}x2 pro Linie`);
   return { clues, errors };
 }
 
@@ -985,16 +1017,9 @@ function readManualFields() {
     perField.push({ id: inp.id, label: "Spalte " + COL_LABELS[c], errors });
     totalErrors += errors.length;
   }
-  // Sort each line into the canonical display order (duplicate, sequence,
-  // pairSums by position, totalSum last) so re-encode produces a stable code.
-  const rank = (cl) => {
-    if (cl.type === "duplicate") return 0;
-    if (cl.type === "directSequence" || cl.type === "directDescending" ||
-        cl.type === "ascending" || cl.type === "descending") return 1;
-    if (cl.type === "pairSum") return 2 + cl.cells[0][0] * N + cl.cells[0][1];
-    return 100;
-  };
-  for (const list of rowClues.concat(colClues)) list.sort((a, b) => rank(a) - rank(b));
+  // Sort each line into the canonical display order (clueDisplayRank from
+  // logicals.solver.js) so re-encode produces a stable code.
+  for (const list of rowClues.concat(colClues)) list.sort((a, b) => clueDisplayRank(a) - clueDisplayRank(b));
   return { clues: { rowClues, colClues }, perField, totalErrors };
 }
 

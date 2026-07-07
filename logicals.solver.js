@@ -29,6 +29,10 @@ function clueText(clue) {
   switch (clue.type) {
     case "duplicate":
       return `Die ${clue.value} kommt doppelt vor.`;
+    case "once":
+      return `Die ${clue.value} kommt genau einmal vor.`;
+    case "absent":
+      return `Die ${clue.value} kommt nicht vor.`;
     case "pairSum": {
       const [a, b] = clue.cells;
       return `${cellLabel(a[0],a[1])} plus ${cellLabel(b[0],b[1])} ergibt ${clue.value}.`;
@@ -59,7 +63,9 @@ function clueText(clue) {
 // === Puzzle-code (clues) encoding ===
 //
 // Wire format (Crockford-Base32, dash-grouped every 4 chars):
-//   4 bits  version (0)
+//   4 bits  version (0 or 1; 1 only when once/absent clues are present, so
+//           puzzles without them keep byte-identical v0 codes that older
+//           deployed pages still decode)
 //   60 bits pairSum bitmap  (indices 0..29 = horizontal pairs in row-major (r*5+c),
 //                            indices 30..59 = vertical pairs in col-major (c*5+r))
 //     + 4 bits per set bit: pairSum value − 3  (range 3..17 → 0..14)
@@ -70,9 +76,16 @@ function clueText(clue) {
 //   12 bits sequence bitmap  (same line ordering)
 //     + 2 bits per set bit: type code (0=directSequence, 1=ascending,
 //                                       2=descending, 3=directDescending)
+//   [v1 only]
+//   12 bits "once" line bitmap (same line ordering; value appears exactly once)
+//     + 9 bits per set line: value mask (bit k = value k+1) — supports several
+//       once values per line, order-independent (canonical by construction)
+//   12 bits "absent" line bitmap (value does not appear in the line)
+//     + 9 bits per set line: value mask, same shape
+//   [end v1]
 //   8  bits checksum: sum of all preceding data bytes (8-bit groups, last padded
 //                     with zeros) mod 256
-// Total size: 152–200 bits → 31–40 base32 chars depending on clue density.
+// Total size: 152–200 bits (v0) → 31–40 base32 chars depending on clue density.
 // Round-tripping: encode(decode(code)) === code (canonical clue ordering preserved).
 
 const PAIR_HORIZ_COUNT = N * (N - 1);  // 30
@@ -132,26 +145,50 @@ function base32ToBits(s) {
 
 const SEQ_TYPES = ["directSequence", "ascending", "descending", "directDescending"];
 
+// Canonical per-line clue display order (duplicate, once, absent, sequence,
+// pairSums left-to-right / top-to-bottom, totalSum last). Shared by
+// decodePuzzle and the manual editor; workerCode's displayRank mirrors it
+// (separate realm — it cannot reference this function).
+function clueDisplayRank(cl) {
+  if (cl.type === "duplicate") return 0;
+  if (cl.type === "once") return 10 + cl.value;
+  if (cl.type === "absent") return 30 + cl.value;
+  if (SEQ_TYPES.indexOf(cl.type) >= 0) return 50;
+  if (cl.type === "pairSum") return 60 + cl.cells[0][0] * N + cl.cells[0][1];
+  return 1000; // totalSum last
+}
+
 function encodePuzzle(clues) {
   // Bucket clues by type, keyed by their compact index.
   const pairVal = new Map();    // pairIndex (0..59)  -> value (3..17)
   const totalVal = new Map();   // lineIndex (0..11) -> value (6..54)
   const dupVal = new Map();     // lineIndex (0..11) -> value (1..9)
   const seqVal = new Map();     // lineIndex (0..11) -> type code (0/1/2)
+  const onceVal = new Map();    // lineIndex (0..11) -> 9-bit value mask
+  const absentVal = new Map();  // lineIndex (0..11) -> 9-bit value mask
   const lineIdx = (scope, idx) => scope === "row" ? idx : N + idx;
 
   for (const list of clues.rowClues.concat(clues.colClues)) for (const cl of list) {
     if (cl.type === "pairSum")            pairVal.set(pairIndexOf(cl.cells), cl.value);
     else if (cl.type === "totalSum")      totalVal.set(lineIdx(cl.scope, cl.index), cl.value);
     else if (cl.type === "duplicate")     dupVal.set(lineIdx(cl.scope, cl.index), cl.value);
-    else {
+    else if (cl.type === "once") {
+      const li = lineIdx(cl.scope, cl.index);
+      onceVal.set(li, (onceVal.get(li) || 0) | (1 << (cl.value - 1)));
+    } else if (cl.type === "absent") {
+      const li = lineIdx(cl.scope, cl.index);
+      absentVal.set(li, (absentVal.get(li) || 0) | (1 << (cl.value - 1)));
+    } else {
       const tc = SEQ_TYPES.indexOf(cl.type);
       if (tc >= 0) seqVal.set(lineIdx(cl.scope, cl.index), tc);
     }
   }
 
+  // v1 only when needed: puzzles without once/absent clues keep their v0 code.
+  const ver = (onceVal.size || absentVal.size) ? 1 : 0;
+
   const bits = [];
-  pushBits(bits, 0, 4); // version
+  pushBits(bits, ver, 4); // version
   // pairSum bitmap + values
   for (let i = 0; i < PAIR_TOTAL; i++) bits.push(pairVal.has(i) ? 1 : 0);
   for (let i = 0; i < PAIR_TOTAL; i++) if (pairVal.has(i)) pushBits(bits, pairVal.get(i) - 3, 4);
@@ -164,6 +201,14 @@ function encodePuzzle(clues) {
   // sequence bitmap + types
   for (let i = 0; i < 2 * N; i++) bits.push(seqVal.has(i) ? 1 : 0);
   for (let i = 0; i < 2 * N; i++) if (seqVal.has(i)) pushBits(bits, seqVal.get(i), 2);
+  if (ver === 1) {
+    // once bitmap + per-line value masks
+    for (let i = 0; i < 2 * N; i++) bits.push(onceVal.has(i) ? 1 : 0);
+    for (let i = 0; i < 2 * N; i++) if (onceVal.has(i)) pushBits(bits, onceVal.get(i), 9);
+    // absent bitmap + per-line value masks
+    for (let i = 0; i < 2 * N; i++) bits.push(absentVal.has(i) ? 1 : 0);
+    for (let i = 0; i < 2 * N; i++) if (absentVal.has(i)) pushBits(bits, absentVal.get(i), 9);
+  }
   // checksum
   pushBits(bits, checksum8(bits), 8);
 
@@ -182,7 +227,7 @@ function decodePuzzle(code) {
   try {
     need(4);
     const ver = readBits(bits, pos, 4); pos += 4;
-    if (ver !== 0) return null;
+    if (ver !== 0 && ver !== 1) return null;
 
     // pairSum
     need(PAIR_TOTAL);
@@ -219,6 +264,25 @@ function decodePuzzle(code) {
       if (t > 3) return null;
       seqList.push({ line: i, type: t });
     }
+    // once / absent (v1 only): line bitmap + 9-bit value mask per set line
+    const onceMask = new Array(2 * N).fill(0);
+    const absentMask = new Array(2 * N).fill(0);
+    if (ver === 1) {
+      for (const target of [onceMask, absentMask]) {
+        need(2 * N);
+        const lineBits = bits.slice(pos, pos + 2 * N); pos += 2 * N;
+        for (let i = 0; i < 2 * N; i++) if (lineBits[i]) {
+          need(9); const m = readBits(bits, pos, 9); pos += 9;
+          if (m === 0) return null; // flagged line without values is malformed
+          target[i] = m;
+        }
+      }
+      // Count clues about the same (line, value) must not contradict.
+      for (let i = 0; i < 2 * N; i++) {
+        const d = dupList.filter(x => x.line === i).reduce((m, x) => m | (1 << (x.value - 1)), 0);
+        if ((d & (onceMask[i] | absentMask[i])) || (onceMask[i] & absentMask[i])) return null;
+      }
+    }
     // checksum
     need(8);
     const expected = checksum8(bits.slice(0, pos));
@@ -241,15 +305,13 @@ function decodePuzzle(code) {
     }
     for (const ts of tsList) addLine(ts.line, { type: "totalSum", value: ts.value });
     for (const d of dupList) addLine(d.line, { type: "duplicate", value: d.value, mandatory: true });
+    for (let i = 0; i < 2 * N; i++) for (let v = 1; v <= 9; v++) {
+      if (onceMask[i] & (1 << (v - 1))) addLine(i, { type: "once", value: v });
+      if (absentMask[i] & (1 << (v - 1))) addLine(i, { type: "absent", value: v });
+    }
     for (const s of seqList) addLine(s.line, { type: SEQ_TYPES[s.type] });
 
-    const rank = (cl) => {
-      if (cl.type === "duplicate") return 0;
-      if (cl.type === "directSequence" || cl.type === "directDescending" || cl.type === "ascending" || cl.type === "descending") return 1;
-      if (cl.type === "pairSum") return 2 + cl.cells[0][0] * N + cl.cells[0][1];
-      return 100; // totalSum last
-    };
-    for (const list of rowClues.concat(colClues)) list.sort((a, b) => rank(a) - rank(b));
+    for (const list of rowClues.concat(colClues)) list.sort((a, b) => clueDisplayRank(a) - clueDisplayRank(b));
 
     return { rowClues, colClues };
   } catch (e) {
@@ -452,6 +514,20 @@ function workerCode() {
     return null;
   }
 
+  // Once/absent candidates: every value that appears exactly once (resp. not
+  // at all) in the line is a true "Vx1" (resp. "Vx0") statement. Disjoint from
+  // the duplicate value by construction. All candidates are emitted; the
+  // selection policy (how many to actually keep) lives in pickClues.
+  function countCandidates(vals, scope, index) {
+    const counts = new Array(10).fill(0);
+    for (const v of vals) counts[v]++;
+    const list = [];
+    for (let v = 1; v <= 9; v++) {
+      if (counts[v] === 1) list.push({ type: "once", scope: scope, index: index, value: v });
+      else if (counts[v] === 0) list.push({ type: "absent", scope: scope, index: index, value: v });
+    }
+    return list;
+  }
   function rowCandidates(grid, r) {
     const vals = rowOf(grid, r);
     const list = [];
@@ -461,6 +537,7 @@ function workerCode() {
       list.push({ type: "pairSum", cells: [[r,c],[r,c+1]], value: vals[c] + vals[c+1] });
     }
     list.push({ type: "totalSum", scope: "row", index: r, value: sumOf(vals) });
+    for (const cl of countCandidates(vals, "row", r)) list.push(cl);
     if (isDirectSequence(vals)) list.push({ type: "directSequence", scope: "row", index: r });
     else if (isDirectDescending(vals)) list.push({ type: "directDescending", scope: "row", index: r });
     else if (isAscending(vals)) list.push({ type: "ascending", scope: "row", index: r });
@@ -476,6 +553,7 @@ function workerCode() {
       list.push({ type: "pairSum", cells: [[r,c],[r+1,c]], value: vals[r] + vals[r+1] });
     }
     list.push({ type: "totalSum", scope: "col", index: c, value: sumOf(vals) });
+    for (const cl of countCandidates(vals, "col", c)) list.push(cl);
     if (isDirectSequence(vals)) list.push({ type: "directSequence", scope: "col", index: c });
     else if (isDirectDescending(vals)) list.push({ type: "directDescending", scope: "col", index: c });
     else if (isAscending(vals)) list.push({ type: "ascending", scope: "col", index: c });
@@ -509,6 +587,10 @@ function workerCode() {
   function logicalSolve(selected) {
     const rowDup = new Int32Array(N);
     const colDup = new Int32Array(N);
+    const rowOnce = new Int32Array(N);
+    const colOnce = new Int32Array(N);
+    const rowAbsent = new Int32Array(N);
+    const colAbsent = new Int32Array(N);
     const pairs = [];
     const totals = [];
     const seqs = [];
@@ -516,6 +598,12 @@ function workerCode() {
       if (cl.type === "duplicate") {
         if (cl.scope === "row") rowDup[cl.index] |= 1 << (cl.value - 1);
         else colDup[cl.index] |= 1 << (cl.value - 1);
+      } else if (cl.type === "once") {
+        if (cl.scope === "row") rowOnce[cl.index] |= 1 << (cl.value - 1);
+        else colOnce[cl.index] |= 1 << (cl.value - 1);
+      } else if (cl.type === "absent") {
+        if (cl.scope === "row") rowAbsent[cl.index] |= 1 << (cl.value - 1);
+        else colAbsent[cl.index] |= 1 << (cl.value - 1);
       } else if (cl.type === "pairSum") {
         const a = cl.cells[0][0]*N + cl.cells[0][1];
         const b = cl.cells[1][0]*N + cl.cells[1][1];
@@ -528,6 +616,14 @@ function workerCode() {
     }
     for (let r = 0; r < N; r++) for (const cl of selected.rowClues[r]) reg(cl);
     for (let c = 0; c < N; c++) for (const cl of selected.colClues[c]) reg(cl);
+    // Count clues about the same value on the same line must not contradict:
+    // dup/once/absent are pairwise exclusive per (line, value). Valid sources
+    // (generator, editor, decode) never produce overlaps; this guard just
+    // keeps the solver total on malformed input.
+    for (let i = 0; i < N; i++) {
+      if ((rowDup[i] & (rowOnce[i] | rowAbsent[i])) || (rowOnce[i] & rowAbsent[i])) return { solved: false, grid: null };
+      if ((colDup[i] & (colOnce[i] | colAbsent[i])) || (colOnce[i] & colAbsent[i])) return { solved: false, grid: null };
+    }
     // Attach the line's duplicate-value mask to each totalSum (used by the
     // distinct-sum propagator below). Must run after all reg() calls so the
     // duplicate clues on the same line have been registered.
@@ -547,13 +643,13 @@ function workerCode() {
       const ts = totalSumFor("row", r), dm = rowDup[r];
       if (ts < 0 && dm === 0) continue;
       const cells = []; for (let c = 0; c < N; c++) cells.push(r * N + c);
-      lineSearches.push({ cells: cells, dupMask: dm, totalSum: ts, snap: null });
+      lineSearches.push({ cells: cells, dupMask: dm, onceMask: rowOnce[r], totalSum: ts, snap: null });
     }
     for (let c = 0; c < N; c++) {
       const ts = totalSumFor("col", c), dm = colDup[c];
       if (ts < 0 && dm === 0) continue;
       const cells = []; for (let r = 0; r < N; r++) cells.push(r * N + c);
-      lineSearches.push({ cells: cells, dupMask: dm, totalSum: ts, snap: null });
+      lineSearches.push({ cells: cells, dupMask: dm, onceMask: colOnce[c], totalSum: ts, snap: null });
     }
 
     const domains = new Int32Array(N*N).fill(FULL_DOMAIN);
@@ -580,16 +676,28 @@ function workerCode() {
     function maxV(mask) { for (let v = 9; v >= 1; v--) if (mask & (1 << (v-1))) return v; return 0; }
     function isSingle(idx) { return POPCOUNT[domains[idx]] === 1; }
 
+    // Absent clues ("value doesn't appear in this line") are a one-time strike:
+    // remove the value from all six cells. Domains only shrink, so one pass
+    // before the fixpoint loop is complete.
+    for (let r = 0; r < N; r++) if (rowAbsent[r]) {
+      for (let c = 0; c < N; c++) restrict(r * N + c, FULL_DOMAIN & ~rowAbsent[r]);
+    }
+    for (let c = 0; c < N; c++) if (colAbsent[c]) {
+      for (let r = 0; r < N; r++) restrict(r * N + c, FULL_DOMAIN & ~colAbsent[c]);
+    }
+    if (bad) return { solved: false, grid: null };
+
     // A row/col holds only 6 of the 9 values, so most values appear 0 or 1
     // times — there is NO "every value appears" lower bound (unlike Sudoku).
-    // The only per-line lower bound is the explicit duplicate value, which
-    // must appear exactly twice. So hidden-single reasoning applies solely to
-    // the duplicate value; for everything else we enforce just distinctness.
-    function unitElim(getIdx, dupMask) {
+    // The only per-line lower bounds are the explicit duplicate value (exactly
+    // twice) and an explicit once value (exactly once). Hidden-single reasoning
+    // applies solely to those; for everything else we enforce just distinctness.
+    function unitElim(getIdx, dupMask, onceMask) {
       for (let v = 1; v <= 9; v++) {
         const bit = 1 << (v - 1);
         const isDup = (dupMask & bit) !== 0;
         const maxCount = isDup ? 2 : 1;
+        const minCount = isDup ? 2 : ((onceMask & bit) ? 1 : 0);
         let single = 0;
         const open = [];
         for (let k = 0; k < N; k++) {
@@ -599,10 +707,10 @@ function workerCode() {
         if (single > maxCount) { bad = true; return; }
         if (single >= maxCount) {
           for (const idx of open) clearBit(idx, v); // distinctness: no more copies allowed
-        } else if (isDup) {
-          // Duplicate value must appear exactly twice -> lower bound applies.
-          if (single + open.length < maxCount) { bad = true; return; }
-          if (open.length === maxCount - single) for (const idx of open) restrict(idx, bit);
+        } else if (minCount > 0) {
+          // Dup/once value must appear exactly twice/once -> lower bound applies.
+          if (single + open.length < minCount) { bad = true; return; }
+          if (open.length === minCount - single) for (const idx of open) restrict(idx, bit);
         }
       }
     }
@@ -701,9 +809,9 @@ function workerCode() {
       if (bad) break;
 
       // Per-row / per-col uniqueness elimination + hidden singles.
-      for (let r = 0; r < N && !bad; r++) unitElim(k => r*N + k, rowDup[r]);
+      for (let r = 0; r < N && !bad; r++) unitElim(k => r*N + k, rowDup[r], rowOnce[r]);
       if (bad) break;
-      for (let c = 0; c < N && !bad; c++) unitElim(k => k*N + c, colDup[c]);
+      for (let c = 0; c < N && !bad; c++) unitElim(k => k*N + c, colDup[c], colOnce[c]);
       if (bad) break;
 
       // Global count: each value appears exactly 4×. Three sub-rules per V:
@@ -808,6 +916,7 @@ function workerCode() {
           if (!dirty) continue;
         }
         const dupMask = ls.dupMask;
+        const onceMask = ls.onceMask;
         const target = ls.totalSum; // -1 if no totalSum clue
         const support = [0, 0, 0, 0, 0, 0];
         const assigned = [0, 0, 0, 0, 0, 0];
@@ -815,8 +924,13 @@ function workerCode() {
         function search(i, sumSoFar, dupLastPos) {
           if (i === 6) {
             if (target >= 0 && sumSoFar !== target) return;
-            // Each duplicate value must appear EXACTLY twice (not 0 or 1).
-            for (let v = 1; v <= 9; v++) if ((dupMask & (1 << (v - 1))) && usage[v] !== 2) return;
+            // Each duplicate value must appear EXACTLY twice (not 0 or 1),
+            // each once value exactly once (≤1 is enforced during descent).
+            for (let v = 1; v <= 9; v++) {
+              const b = 1 << (v - 1);
+              if ((dupMask & b) && usage[v] !== 2) return;
+              if ((onceMask & b) && usage[v] !== 1) return;
+            }
             for (let j = 0; j < 6; j++) support[j] |= 1 << (assigned[j] - 1);
             return;
           }
@@ -915,6 +1029,39 @@ function workerCode() {
     for (let r = 0; r < N; r++) for (const cl of cands.rowCands[r]) selected.rowClues[r].push(cl);
     for (let c = 0; c < N; c++) for (const cl of cands.colCands[c]) selected.colClues[c].push(cl);
 
+    // Once/absent policy: the candidates are ~9 extra clues per line — pure
+    // information, never needed for deducibility. Trial-removing them all
+    // would roughly double minimisation time, so instead pick a small random
+    // subset up front (0..maxOnceClues / 0..maxAbsentClues, at most one of
+    // each kind per line), keep-protect it so it survives — and steers —
+    // minimisation, and drop every other once/absent candidate entirely.
+    {
+      const maxOnce = (cfg && typeof cfg.maxOnceClues === "number") ? cfg.maxOnceClues : 2;
+      const maxAbsent = (cfg && typeof cfg.maxAbsentClues === "number") ? cfg.maxAbsentClues : 2;
+      const pickSubset = (type, max) => {
+        const pool = [];
+        for (const list of selected.rowClues) for (const cl of list) if (cl.type === type) pool.push(cl);
+        for (const list of selected.colClues) for (const cl of list) if (cl.type === type) pool.push(cl);
+        shuffle(pool);
+        const want = Math.floor(Math.random() * (max + 1));
+        const chosen = new Set(), usedLines = new Set();
+        for (const cl of pool) {
+          if (chosen.size >= want) break;
+          const key = cl.scope + cl.index;
+          if (usedLines.has(key)) continue;
+          usedLines.add(key);
+          cl.keep = true;
+          chosen.add(cl);
+        }
+        return chosen;
+      };
+      const keepOnce = pickSubset("once", maxOnce);
+      const keepAbsent = pickSubset("absent", maxAbsent);
+      const dropIt = cl => (cl.type === "once" && !keepOnce.has(cl)) || (cl.type === "absent" && !keepAbsent.has(cl));
+      for (const list of selected.rowClues.concat(selected.colClues))
+        for (let i = list.length - 1; i >= 0; i--) if (dropIt(list[i])) list.splice(i, 1);
+    }
+
     // Gate: even the maximal clue set must be deducible. (It nearly always is,
     // since every adjacent pairSum plus every totalSum is present.)
     if (!logicalSolve(selected).solved) return null;
@@ -957,6 +1104,9 @@ function workerCode() {
     //                  (pairSums are mostly load-bearing) but still works
     //                  within the tournament budget.
     function removeRank(cl) {
+      // once/absent: inert while keep-protected (the up-front subset pick is
+      // the actual policy), but rank them with totalSum in case that changes.
+      if (cl.type === "once" || cl.type === "absent") return 0;
       if (cfg.fewerPairSums) {
         if (cl.type === "pairSum") return 0;
         if (cl.type === "totalSum") return 1;
@@ -1016,8 +1166,9 @@ function workerCode() {
     if (cfg.targetClues > totalClues()) {
       const lineOf = e => e.kind === "row" ? selected.rowClues[e.i] : selected.colClues[e.i];
       const pool = [];
-      for (let r = 0; r < N; r++) for (const cl of cands.rowCands[r]) if (selected.rowClues[r].indexOf(cl) < 0) pool.push({ kind: "row", i: r, cl });
-      for (let c = 0; c < N; c++) for (const cl of cands.colCands[c]) if (selected.colClues[c].indexOf(cl) < 0) pool.push({ kind: "col", i: c, cl });
+      const addable = cl => cl.type !== "once" && cl.type !== "absent"; // subset pick is final
+      for (let r = 0; r < N; r++) for (const cl of cands.rowCands[r]) if (addable(cl) && selected.rowClues[r].indexOf(cl) < 0) pool.push({ kind: "row", i: r, cl });
+      for (let c = 0; c < N; c++) for (const cl of cands.colCands[c]) if (addable(cl) && selected.colClues[c].indexOf(cl) < 0) pool.push({ kind: "col", i: c, cl });
       shuffle(pool);
       while (totalClues() < cfg.targetClues && pool.length) {
         let bestK = -1, bestLen = Infinity;
@@ -1051,13 +1202,16 @@ function workerCode() {
       if (countTotalSums() > MAX_TOTAL_SUMS) return null;
     }
 
-    // Tidy display order within each line: duplicate, sequence, pairSums
-    // (left-to-right / top-to-bottom), then totalSum.
+    // Tidy display order within each line: duplicate, once, absent, sequence,
+    // pairSums (left-to-right / top-to-bottom), then totalSum. Mirrors the
+    // main thread's clueDisplayRank (separate realm — can't share it).
     function displayRank(cl) {
       if (cl.type === "duplicate") return 0;
-      if (isSeqType(cl.type)) return 1;
-      if (cl.type === "pairSum") return 2 + cl.cells[0][0]*N + cl.cells[0][1];
-      return 100; // totalSum
+      if (cl.type === "once") return 10 + cl.value;
+      if (cl.type === "absent") return 30 + cl.value;
+      if (isSeqType(cl.type)) return 50;
+      if (cl.type === "pairSum") return 60 + cl.cells[0][0]*N + cl.cells[0][1];
+      return 1000; // totalSum
     }
     for (let r = 0; r < N; r++) selected.rowClues[r].sort((a, b) => displayRank(a) - displayRank(b));
     for (let c = 0; c < N; c++) selected.colClues[c].sort((a, b) => displayRank(a) - displayRank(b));
@@ -1091,6 +1245,8 @@ function workerCode() {
     const minTS = (typeof cfg.minTotalSum === "number") ? cfg.minTotalSum : 0;
     const maxTS = (typeof cfg.maxTotalSum === "number") ? cfg.maxTotalSum : 99;
     const fewerPairSums = !!cfg.fewerPairSums;
+    const maxOnce = (typeof cfg.maxOnceClues === "number") ? cfg.maxOnceClues : 2;
+    const maxAbsent = (typeof cfg.maxAbsentClues === "number") ? cfg.maxAbsentClues : 2;
     // The main thread classifies each candidate by difficulty LEVEL (via the
     // trace), so the worker just streams VARIETY: it posts the latest accepted
     // puzzle, throttled to ~8/sec, regardless of clue count. (Posting every
@@ -1104,7 +1260,7 @@ function workerCode() {
       const numSeq = (typeof seqMode === "number") ? seqMode : 1 + ((Math.random() * 3) | 0);
       const grid = generateGrid(numSeq, maxDup, minDup);
       if (grid) {
-        const clues = pickClues(grid, { targetClues: 0, minTotalSum: minTS, maxTotalSum: maxTS, numSequences: numSeq, fewerPairSums: fewerPairSums });
+        const clues = pickClues(grid, { targetClues: 0, minTotalSum: minTS, maxTotalSum: maxTS, numSequences: numSeq, fewerPairSums: fewerPairSums, maxOnceClues: maxOnce, maxAbsentClues: maxAbsent });
         if (clues) pending = { grid: grid, clues: clues, clueCount: clueCountOf(clues) };
       }
       const now = Date.now();
@@ -1131,8 +1287,10 @@ function workerCode() {
 // near the 80th percentile of generated puzzles at penalty 10).
 const RULE_WEIGHT = {
   "adjacency": 1,
+  "absent": 1,
   "distinct-row": 1, "distinct-col": 1,
   "dup-hidden-row": 2, "dup-hidden-col": 2,
+  "once-hidden-row": 2, "once-hidden-col": 2,
   "global": 2,
   "global-hidden": 2,
   "global-dup-rows": 5, "global-dup-cols": 5,
@@ -1206,23 +1364,31 @@ function countHardSteps(trace, t) {
 // ≥"Mittel"). `cfg` biases generation toward the band (clue-type mix + the
 // per-level maxTotalSum/duplicate counts); the actual gate is puzzleLevel() on the
 // solved trace + clue features.
+// maxOnceClues/maxAbsentClues cap how many once/absent clues pickClues may
+// keep-protect per puzzle (it picks 0..max at random). L1 forbids once clues
+// entirely — a once clue floors the level at 2 (see clueFeatures) and would
+// push every candidate out of the L1 band. Absent clues set no floor, so L1
+// may carry them.
 const LEVELS = [
-  { id: 1, name: "Sehr leicht", cfg: { minTotalSum: 0, maxTotalSum: 0, minDupLines: 0, maxDupLines: 0, fewerPairSums: false } },
-  { id: 2, name: "Leicht",      cfg: { minTotalSum: 0, maxTotalSum: 0, minDupLines: 1, maxDupLines: 1, fewerPairSums: false } },
-  { id: 3, name: "Mittel",      cfg: { minTotalSum: 1, maxTotalSum: 2, minDupLines: 1, maxDupLines: 1, fewerPairSums: false } },
-  { id: 4, name: "Schwer",      cfg: { minTotalSum: 2, maxTotalSum: 4, minDupLines: 1, maxDupLines: 2, fewerPairSums: false } },
-  { id: 5, name: "Sehr schwer", cfg: { minTotalSum: 3, maxTotalSum: 6, minDupLines: 2, maxDupLines: 2, fewerPairSums: false } },
-  { id: 6, name: "Extrem",      cfg: { minTotalSum: 4, maxTotalSum: 6, minDupLines: 2, maxDupLines: 2, fewerPairSums: false } },
+  { id: 1, name: "Sehr leicht", cfg: { minTotalSum: 0, maxTotalSum: 0, minDupLines: 0, maxDupLines: 0, fewerPairSums: false, maxOnceClues: 0, maxAbsentClues: 2 } },
+  { id: 2, name: "Leicht",      cfg: { minTotalSum: 0, maxTotalSum: 0, minDupLines: 1, maxDupLines: 1, fewerPairSums: false, maxOnceClues: 2, maxAbsentClues: 2 } },
+  { id: 3, name: "Mittel",      cfg: { minTotalSum: 1, maxTotalSum: 2, minDupLines: 1, maxDupLines: 1, fewerPairSums: false, maxOnceClues: 2, maxAbsentClues: 2 } },
+  { id: 4, name: "Schwer",      cfg: { minTotalSum: 2, maxTotalSum: 4, minDupLines: 1, maxDupLines: 2, fewerPairSums: false, maxOnceClues: 2, maxAbsentClues: 2 } },
+  { id: 5, name: "Sehr schwer", cfg: { minTotalSum: 3, maxTotalSum: 6, minDupLines: 2, maxDupLines: 2, fewerPairSums: false, maxOnceClues: 2, maxAbsentClues: 2 } },
+  { id: 6, name: "Extrem",      cfg: { minTotalSum: 4, maxTotalSum: 6, minDupLines: 2, maxDupLines: 2, fewerPairSums: false, maxOnceClues: 2, maxAbsentClues: 2 } },
 ];
 // Clue-type features that gate the easy end (read from the clue SET, not the
 // trace — a sum/duplicate clue counts even if cheap rules dissolve it to b=1).
 function clueFeatures(clues) {
-  let hasSum = false, dupCount = 0;
+  let hasSum = false, dupCount = 0, onceCount = 0;
   for (const list of clues.rowClues.concat(clues.colClues)) for (const cl of list) {
     if (cl.type === "totalSum") hasSum = true;
     else if (cl.type === "duplicate") dupCount++;
+    else if (cl.type === "once") onceCount++;
+    // "absent" deliberately not counted: a plain strike-out is trivial and
+    // sets no floor — the trace-based classification decides on its own.
   }
-  return { hasSum, dupCount };
+  return { hasSum, dupCount, onceCount };
 }
 // Difficulty level (1–6) = max of three axes. (1) maxB (single hardest survey):
 // separates the easy end (sequences give a ~4 baseline, so >4⇒2; Mittel ends at 6)
@@ -1232,14 +1398,15 @@ function clueFeatures(clues) {
 // forced a genuine ≥3-combination survey: ≥1 ⇒ Schwer, ≥2 ⇒ Sehr schwer (b≤2
 // feasibility steps are essentially forced and don't count). byWork caps at 5:
 // Extrem is reached via maxB only, so a "many surveys, none giant" puzzle stays at
-// Sehr schwer. (3) clue-type floor (sum ⇒ ≥3, dup ⇒ ≥2). Calibrated empirically.
+// Sehr schwer. (3) clue-type floor (sum ⇒ ≥3, dup/once ⇒ ≥2; absent sets no
+// floor — it's a trivial strike-out). Calibrated empirically.
 function puzzleLevel(profile, feat) {
   const maxB = profile.maxB, hard = profile.nFeasHard || 0;
   let byB = 1;
   if (maxB > 25) byB = 6; else if (maxB > 14) byB = 5; else if (maxB > 6) byB = 4; else if (maxB > 4) byB = 2;
   let byWork = 1;
   if (hard >= 2) byWork = 5; else if (hard >= 1) byWork = 4;
-  const byFeat = (feat && feat.hasSum) ? 3 : (feat && feat.dupCount >= 1) ? 2 : 1;
+  const byFeat = (feat && feat.hasSum) ? 3 : (feat && (feat.dupCount >= 1 || feat.onceCount >= 1)) ? 2 : 1;
   return Math.max(byB, byWork, byFeat);
 }
 
@@ -1259,10 +1426,16 @@ function solveWithTrace(clues) {
     return cells;
   }
   const rowDup = new Array(N).fill(0), colDup = new Array(N).fill(0);
+  const rowOnce = new Array(N).fill(0), colOnce = new Array(N).fill(0);
+  const rowAbsent = new Array(N).fill(0), colAbsent = new Array(N).fill(0);
   const pairs = [], totals = [], seqs = [];
   function reg(cl) {
     if (cl.type === "duplicate") {
       if (cl.scope === "row") rowDup[cl.index] |= 1 << (cl.value - 1); else colDup[cl.index] |= 1 << (cl.value - 1);
+    } else if (cl.type === "once") {
+      if (cl.scope === "row") rowOnce[cl.index] |= 1 << (cl.value - 1); else colOnce[cl.index] |= 1 << (cl.value - 1);
+    } else if (cl.type === "absent") {
+      if (cl.scope === "row") rowAbsent[cl.index] |= 1 << (cl.value - 1); else colAbsent[cl.index] |= 1 << (cl.value - 1);
     } else if (cl.type === "pairSum") {
       pairs.push({ a: cl.cells[0][0] * N + cl.cells[0][1], b: cl.cells[1][0] * N + cl.cells[1][1], value: cl.value });
     } else if (cl.type === "totalSum") {
@@ -1273,6 +1446,13 @@ function solveWithTrace(clues) {
   }
   for (let r = 0; r < N; r++) for (const cl of clues.rowClues[r]) reg(cl);
   for (let c = 0; c < N; c++) for (const cl of clues.colClues[c]) reg(cl);
+  // dup/once/absent are pairwise exclusive per (line, value) — mirror of the
+  // logicalSolve guard, keeps the mirror total on malformed input.
+  for (let i = 0; i < N; i++) {
+    if ((rowDup[i] & (rowOnce[i] | rowAbsent[i])) || (rowOnce[i] & rowAbsent[i]) ||
+        (colDup[i] & (colOnce[i] | colAbsent[i])) || (colOnce[i] & colAbsent[i]))
+      return { solved: false, steps: [], grid: Array.from({ length: N }, () => Array(N).fill(0)) };
+  }
   // Attach duplicate-value mask to each totalSum line for the distinct-sum rule.
   for (const t of totals) t.dupMask = t.scope === "row" ? rowDup[t.index] : colDup[t.index];
 
@@ -1288,13 +1468,13 @@ function solveWithTrace(clues) {
     const ts = lineTotalSum("row", r), dm = rowDup[r];
     if (ts < 0 && dm === 0) continue;
     const cells = []; for (let c = 0; c < N; c++) cells.push(r * N + c);
-    lineSearches.push({ cells, dupMask: dm, totalSum: ts, scope: "row", index: r, snap: null });
+    lineSearches.push({ cells, dupMask: dm, onceMask: rowOnce[r], totalSum: ts, scope: "row", index: r, snap: null });
   }
   for (let c = 0; c < N; c++) {
     const ts = lineTotalSum("col", c), dm = colDup[c];
     if (ts < 0 && dm === 0) continue;
     const cells = []; for (let r = 0; r < N; r++) cells.push(r * N + c);
-    lineSearches.push({ cells, dupMask: dm, totalSum: ts, scope: "col", index: c, snap: null });
+    lineSearches.push({ cells, dupMask: dm, onceMask: colOnce[c], totalSum: ts, scope: "col", index: c, snap: null });
   }
 
   const domains = new Array(N * N).fill(FULL);
@@ -1330,11 +1510,13 @@ function solveWithTrace(clues) {
     }
     cur = null;
   }
-  function unit(getIdx, dupMask, label, scope) {
+  function unit(getIdx, dupMask, onceMask, label, scope) {
     const rt = scope === "row" ? "distinct-row" : "distinct-col";
     const rtDup = scope === "row" ? "dup-hidden-row" : "dup-hidden-col";
+    const rtOnce = scope === "row" ? "once-hidden-row" : "once-hidden-col";
     for (let v = 1; v <= 9 && !bad; v++) {
       const b = bit(v), isDup = (dupMask & b) !== 0, maxC = isDup ? 2 : 1;
+      const minC = isDup ? 2 : ((onceMask & b) ? 1 : 0);
       let single = 0; const open = [], fixedAt = [];
       for (let k = 0; k < N; k++) { const idx = getIdx(k); if (domains[idx] & b) { if (isSingle(idx)) { single++; fixedAt.push(idx); } else open.push(idx); } }
       if (single > maxC) { bad = true; return; }
@@ -1342,11 +1524,13 @@ function solveWithTrace(clues) {
         begin(); for (const idx of open) rmBit(idx, v);
         commit("Jede Zahl höchstens einmal pro " + (scope === "row" ? "Reihe" : "Spalte") + ".", rt,
           { value: v, fixedAt: fixedAt.slice(), label, scope });
-      } else if (isDup && single < maxC) {
-        if (single + open.length < maxC) { bad = true; return; }
-        if (open.length === maxC - single) {
+      } else if (minC > 0 && single < minC) {
+        if (single + open.length < minC) { bad = true; return; }
+        if (open.length === minC - single) {
           begin(); for (const idx of open) keep(idx, b);
-          commit("Die " + v + " muss zweimal in " + label + " stehen — nur diese Plätze bleiben übrig.", rtDup,
+          if (isDup) commit("Die " + v + " muss zweimal in " + label + " stehen — nur diese Plätze bleiben übrig.", rtDup,
+            { value: v, cells: open.slice(), label, scope });
+          else commit("Die " + v + " muss genau einmal in " + label + " stehen — nur " + open.map(cl2).join(", ") + " bleibt übrig.", rtOnce,
             { value: v, cells: open.slice(), label, scope });
         }
       }
@@ -1483,6 +1667,27 @@ function solveWithTrace(clues) {
     }
   }
 
+  // Absent-Hinweise ("kommt nicht vor"): einmalige Streichung des Werts aus
+  // allen sechs Zellen der Linie — je Hinweis EIN Schritt, ganz am Anfang,
+  // wie ein Mensch das Gitter vorbereiten würde. Domains schrumpfen nur, ein
+  // Durchlauf genügt.
+  for (let r = 0; r < N && !bad; r++) if (rowAbsent[r]) {
+    for (let v = 1; v <= 9 && !bad; v++) if (rowAbsent[r] & bit(v)) {
+      const cells = []; for (let c = 0; c < N; c++) cells.push(r * N + c);
+      begin(); for (const idx of cells) rmBit(idx, v);
+      commit("Die " + v + " kommt in " + rowLabel(r) + " nicht vor — aus allen sechs Zellen streichen.", "absent",
+        { value: v, cells, scope: "row", index: r, label: rowLabel(r) });
+    }
+  }
+  for (let c = 0; c < N && !bad; c++) if (colAbsent[c]) {
+    for (let v = 1; v <= 9 && !bad; v++) if (colAbsent[c] & bit(v)) {
+      const cells = []; for (let r = 0; r < N; r++) cells.push(r * N + c);
+      begin(); for (const idx of cells) rmBit(idx, v);
+      commit("Die " + v + " kommt in " + colLabel(c) + " nicht vor — aus allen sechs Zellen streichen.", "absent",
+        { value: v, cells, scope: "col", index: c, label: colLabel(c) });
+    }
+  }
+
   // Propagation bis zum Fixpunkt. Jede Regelanwendung, die mindestens einen
   // Kandidaten entfernt, ergibt EINEN Schritt (mit Begründung + entfernten Werten).
   let guard = 0;
@@ -1493,10 +1698,10 @@ function solveWithTrace(clues) {
     cascade(); if (bad) break;
     // 2. Distinktheit / Dup-Hidden je Reihe, dann Spalte. (Die Distinktheit
     //    erledigt meist schon die Kaskade; unit liefert zusätzlich Dup-Hidden.)
-    for (let r = 0; r < N && !bad; r++) unit(k => r * N + k, rowDup[r], rowLabel(r), "row");
+    for (let r = 0; r < N && !bad; r++) unit(k => r * N + k, rowDup[r], rowOnce[r], rowLabel(r), "row");
     if (bad) break;
     cascade(); if (bad) break;
-    for (let c = 0; c < N && !bad; c++) unit(k => k * N + c, colDup[c], colLabel(c), "col");
+    for (let c = 0; c < N && !bad; c++) unit(k => k * N + c, colDup[c], colOnce[c], colLabel(c), "col");
     if (bad) break;
     cascade(); if (bad) break;
     // 2b. Naked Pairs je Reihe/Spalte (vor Summen/Feasibility, damit der billige
@@ -1700,6 +1905,7 @@ function solveWithTrace(clues) {
         if (!dirty) continue;
       }
       const dupMask = ls.dupMask;
+      const onceMask = ls.onceMask;
       const target = ls.totalSum;
       const support = [0, 0, 0, 0, 0, 0];
       const assigned = [0, 0, 0, 0, 0, 0];
@@ -1715,7 +1921,11 @@ function solveWithTrace(clues) {
       function search(i, sumSoFar, dupLastPos) {
         if (i === 6) {
           if (target >= 0 && sumSoFar !== target) return;
-          for (let v = 1; v <= 9; v++) if ((dupMask & (1 << (v - 1))) && usage[v] !== 2) return;
+          for (let v = 1; v <= 9; v++) {
+            const b = 1 << (v - 1);
+            if ((dupMask & b) && usage[v] !== 2) return;
+            if ((onceMask & b) && usage[v] !== 1) return;
+          }
           combos.add(assigned.slice().sort((x, y) => x - y).join(","));
           for (let j = 0; j < 6; j++) support[j] |= 1 << (assigned[j] - 1);
           return;
@@ -1743,7 +1953,7 @@ function solveWithTrace(clues) {
       begin();
       for (let j = 0; j < 6 && !bad; j++) keep(cells[j], support[j]);
       commit("Diese Werte passen in keine gültige Belegung dieser Linie.", "lineFeasibility",
-        { cells: cells.slice(), value: target, dupMask: dupMask, scope: ls.scope, index: ls.index }, combos.size);
+        { cells: cells.slice(), value: target, dupMask: dupMask, onceMask: onceMask, scope: ls.scope, index: ls.index }, combos.size);
       if (bad) break;
       if (!ls.snap) ls.snap = new Array(6);
       for (let j = 0; j < 6; j++) ls.snap[j] = domains[cells[j]];

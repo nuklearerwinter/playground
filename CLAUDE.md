@@ -45,14 +45,34 @@ Architectural points that are non-obvious from the code:
   in some real solution). Soundness is what makes "fully determined" equal
   "unique". Note the non-Sudoku trap: a 6-cell line holds only 6 of the 9
   values, so there is **no** per-line "every value appears" lower bound —
-  hidden-single reasoning is valid only for the duplicate value (exactly 2×)
-  and globally (each value exactly 4×).
+  hidden-single reasoning is valid only for explicitly-clued values (duplicate
+  = exactly 2×, `once` = exactly 1×) and globally (each value exactly 4×).
+- **Count clues come in three kinds — `duplicate` (Vx2), `once` (Vx1),
+  `absent` (Vx0).** Only `duplicate` is `mandatory` (its absence is what makes
+  the all-distinct default valid); once/absent are pure extra information.
+  `absent` = a one-time strike of V from the line's six cells (before the
+  fixpoint loop, and a leading `"absent"` trace step, b=1); `once` = a lower
+  bound of 1 handled by the generalized `unitElim`/`unit` minCount (trace
+  ruleType `"once-hidden-row/col"`, b=1) plus a `usage[v]===1` final check in
+  the feasibility DFS via `lineSearches[].onceMask`. **A once/absent clue
+  alone does NOT put a line into `lineSearches`** — a plain line's combination
+  enumeration would explode `b` and wreck the difficulty classification (the
+  hidden single covers the human-reasonable deduction; rules only need to be
+  sound, not complete). Per (line, value) dup/once/absent are pairwise
+  exclusive — editor and `decodePuzzle` validate, both solvers carry a
+  disjointness guard. NB: the feasibility DFS exists in THREE places that must
+  mirror: `logicalSolve`, `solveWithTrace`, and `combosHtmlForStep` (app.js).
 - **Clue selection minimises; `pickClues` is always called with
   `{ targetClues: 0, ... }`.** Start with all candidate clues (gated by
   `logicalSolve`), greedily remove while still deducible (fullest lines first,
   totalSum before pairSum). That removes totalSum hints almost entirely and
   yields ~11–20 clues depending on luck. The `targetClues > 0` rebalance path
-  still exists but is unused by the app.
+  still exists but is unused by the app. **once/absent candidates are NOT
+  minimised**: `buildCandidateClues` emits them all (~9/line), but `pickClues`
+  picks a small random keep-protected subset up front (0..`maxOnceClues` /
+  0..`maxAbsentClues` from the level cfg, ≤1 of each kind per line) and drops
+  the rest before the gate — trial-removing ~100 extra candidates would double
+  the ~6 ms/attempt baseline (measured: the subset scheme costs only ~10–30%).
 - **Difficulty = 6 levels, classified from the solve trace (the level is
   derived, not a knob the user tunes).** The old per-knob settings panel is
   gone; the UI is a single discrete 1–6 slider (`#level-slider`, with a live
@@ -94,7 +114,8 @@ Architectural points that are non-obvious from the code:
     steps are essentially forced and DON'T count** (this is why a puzzle with many
     sum/dup lines but only forced deductions, e.g. fixture `0WH0` = maxB 7 / nFeas 8
     / nFeasHard 1, is Schwer not Sehr schwer — its 8 lines mostly resolve at b≤2).
-  - **clue-type FLOOR** (`sum ⇒ ≥3, duplicate ⇒ ≥2`) gates the easy end;
+  - **clue-type FLOOR** (`sum ⇒ ≥3, duplicate/once ⇒ ≥2`; `absent` sets NO
+    floor — a plain strike-out is trivial) gates the easy end;
     `clueFeatures` reads the clue SET, not the trace (a sum/dup counts even if
     cheap rules dissolve it to `b=1`).
 - **Three cheap rules keep `b` honest** (all in `logicalSolve` AND
@@ -116,10 +137,13 @@ Architectural points that are non-obvious from the code:
   genuinely human-deducible, so correct). **Soundness is preserved by
   confluence** — these reorder which rule gets credit; the fixpoint is unchanged.
 - **`LEVELS` carries each level's generation `cfg`** (`minTotalSum`,
-  `maxTotalSum`, `minDupLines`, `maxDupLines`, `fewerPairSums`) which BIASES
+  `maxTotalSum`, `minDupLines`, `maxDupLines`, `fewerPairSums`, `maxOnceClues`,
+  `maxAbsentClues`) which BIASES
   generation toward the band (e.g. L1 = no sums/dups ⇒ `maxB=1`; L5 =
   `minTotalSum:3` for big enumerations). `cfg` is only a bias; `puzzleLevel` is
-  the gate. **Avoid `fewerPairSums:true`** — it tanks generator yield ~10× (it's
+  the gate. **L1 must keep `maxOnceClues: 0`** (a once clue floors the level at
+  2 and would empty the L1 band); absent is allowed everywhere (no floor).
+  **Avoid `fewerPairSums:true`** — it tanks generator yield ~10× (it's
   why L5 escalates via `minTotalSum` instead). `pickClues` is still always called
   with `{ targetClues: 0 }` (full minimisation); clue count is no longer a
   difficulty knob.
@@ -155,11 +179,17 @@ Architectural points that are non-obvious from the code:
   codes: 0=directSequence, 1=ascending, 2=descending, 3=directDescending
   (codes 0-2 are the original v0 alphabet, 3 was added without a version bump
   since v0 was only minutes old; if you ever need a 5th sequence type, bump
-  to v1 — 2 bits are already saturated). Length 31–42 chars depending on
-  clue density. The grid is **never** stored in the code; the recipient
-  reconstructs it by running `solveWithTrace` on the decoded clues (the
-  generator guarantees deducibility). See `encodePuzzle` / `decodePuzzle` in
-  the main thread.
+  the version — 2 bits are already saturated). **v1 appends two sections after
+  the sequence section** (each: 12-bit line bitmap + 9-bit value MASK per set
+  line): `once`, then `absent` — masks, not single values, so several
+  once/absent values per line encode canonically. `encodePuzzle` emits **v0
+  whenever no once/absent clue exists** (old puzzles keep byte-identical
+  codes; old deployed pages still open them); `decodePuzzle` accepts 0 and 1
+  and rejects per-line dup/once/absent overlaps. Length 31–42 chars (v0)
+  depending on clue density. The grid is **never** stored in the code; the
+  recipient reconstructs it by running `solveWithTrace` on the decoded clues
+  (the generator guarantees deducibility). See `encodePuzzle` /
+  `decodePuzzle` in the main thread.
 - **Step-by-step solution view (`solveWithTrace`).** A main-thread mirror of
   `logicalSolve` that solves from the **clues only** (never reads
   `currentPuzzle.grid`) and records each rule application as a step
@@ -192,7 +222,10 @@ Architectural points that are non-obvious from the code:
   panel per mode and hides the global "Rätsel generieren" button in Editor
   mode.) Syntax per field (case-insensitive, `;` or `,` separated): `A3+A4=11`
   (pairSum, both cells must be in the current line and adjacent), `SUM=29`,
-  `5x2`/`5x`/`2x5`/`5²` (all 4 forms mean "value 5 appears twice"),
+  count clues **value-first** `5x2`/`5x1`/`5x0` (twice / exactly once / not
+  at all; legacy `5x`/`5²` = dup, `2xV` = dup only for V ≥ 3 — **known
+  accepted break**: `2x1` used to mean "dup 1", now means "once 2"; several
+  once/absent per line are fine but at most one of Vx0/Vx1/Vx2 per value),
   `RUN ASC`/`RUN DESC`/`ASC`/`DESC`. After parsing, the clues run through
   `solveWithTrace`; **non-deducible inputs are hard-rejected** (no backtracking
   fallback — magazines are expected to be deducible, and our solver's coverage
