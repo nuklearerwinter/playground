@@ -177,6 +177,7 @@ function startSearch(budgetMs) {
   el("progress").hidden = false;
   el("error").textContent = "";
   el("steps-btn").disabled = true;
+  el("solution-btn").disabled = true;
   exitStepMode();
   el("puzzle").hidden = true; // don't show a stale puzzle while searching
   updateSearchStatus();
@@ -210,6 +211,7 @@ function finishSearch() {
   renderPuzzle(currentPuzzle);
   el("print-btn").disabled = false;
   el("steps-btn").disabled = false;
+  el("solution-btn").disabled = false;
 }
 
 function newSearch() { startSearch(DEFAULT_BUDGET_MS); }
@@ -267,6 +269,9 @@ function ensureGridTable() {
 }
 
 function renderPuzzle(p) {
+  // Frisch-generiert-Zustand: kein alter Schritt-Modus, keine gezeigte Lösung —
+  // egal ob das Rätsel aus Suche, Editor oder Rätselcode kommt.
+  exitStepMode();
   document.getElementById("puzzle").hidden = false;
   document.getElementById("hints-block").hidden = false;
   document.getElementById("code-block").hidden = false;
@@ -317,6 +322,7 @@ function renderPuzzle(p) {
   document.getElementById("qr-wrap").innerHTML =
     `<a class="qr-link" href="?code=${encodeURIComponent(p.code)}" title="Diesen Rätsel-Link öffnen">${makeQrSvg(shareUrl(p.code))}</a>`;
   document.getElementById("error").textContent = "";
+  const codeErr = document.getElementById("code-error"); if (codeErr) codeErr.textContent = "";
   clearGridCells();
   // Mirror the loaded puzzle into the manual-entry fields so users can study
   // the syntax against a concrete example and tweak clues for re-solving.
@@ -361,6 +367,15 @@ function syncManualFieldsFromCurrent(p) {
   const errBox = document.getElementById("manual-error"); if (errBox) errBox.textContent = "";
 }
 
+// Lösung-Toggle (unter dem Gitter, neben "Lösungsweg"): EIN Button wechselt
+// zwischen Zeigen und Verbergen; Zustand und Beschriftung zentral hier.
+let solutionShown = false;
+function setSolutionShown(on) {
+  solutionShown = on;
+  const btn = document.getElementById("solution-btn");
+  if (btn) btn.textContent = on ? "Lösung verbergen" : "Lösung zeigen";
+}
+
 function showSolution(grid) {
   ensureGridTable();
   document.getElementById("grid").classList.remove("pencil");
@@ -373,6 +388,7 @@ function showSolution(grid) {
     if (td.dataset.r === undefined) continue; // skip badge cells
     td.textContent = grid[+td.dataset.r][+td.dataset.c];
   }
+  setSolutionShown(true);
 }
 function clearGridCells() {
   const cells = document.getElementById("grid").querySelectorAll("td");
@@ -474,6 +490,7 @@ function enterStepMode() {
     return;
   }
   stepTrace = tr; stepMode = true; stepIndex = 0;
+  setSolutionShown(false); // Pencil-Marks ersetzen eine ggf. gezeigte Lösung
   document.getElementById("puzzle").hidden = false;
   el("step-panel").hidden = false;
   el("steps-btn").textContent = "Lösungsweg ausblenden";
@@ -817,6 +834,7 @@ function exitStepMode() {
     grid.querySelectorAll("td").forEach(td => td.classList.remove("changed", "solved-now"));
   }
   clearGridCells();
+  setSolutionShown(false);
 }
 function toggleSteps() { if (stepMode) exitStepMode(); else enterStepMode(); }
 
@@ -835,9 +853,11 @@ function syncModeUI() {
   el("reveal").hidden = mode !== "code";
   el("hint-level").hidden = mode !== "level";
   el("hint-calib").hidden = mode !== "calib";
-  // In Editor-/Code-Modus lädt man per panel-eigenem Button ("Rätsel laden" bzw.
-  // "Lösung zeigen"); der globale "Rätsel generieren"-Button passt dort nicht.
+  // In Editor-/Rätselcode-Modus lädt man per panel-eigenem "Rätsel laden"-Button;
+  // der globale "Rätsel generieren"-Button passt dort nicht. Drucken wird im
+  // Rätselcode-Tab ebenfalls nicht gebraucht.
   el("generate-btn").hidden = mode === "manual" || mode === "code";
+  el("print-btn").hidden = mode === "code";
 }
 // Modus-Tabs: den geklickten Tab als aria-selected markieren, dann die
 // mode-abhängige UI (Slider ↔ Kalibrier-Inputs) synchronisieren.
@@ -857,9 +877,12 @@ function syncLevelName() {
 el("level-slider").addEventListener("input", syncLevelName);
 syncLevelName();
 // Load a puzzle from a code: decode → solve → set as currentPuzzle and render.
-// Returns the grid on success, null on failure (with error message side-effect).
-function loadPuzzleFromCode(code, errPrefix) {
-  const err = document.getElementById("error");
+// Returns the grid on success, null on failure (with error message side-effect
+// into errEl, default das globale #error — das sitzt unterm Rätsel und ist beim
+// Klick im Rätselcode-Tab nicht im Viewport, daher reicht der Button dort sein
+// panelnahes #code-error herein).
+function loadPuzzleFromCode(code, errPrefix, errEl) {
+  const err = errEl || document.getElementById("error");
   const clues = decodePuzzle(code);
   if (!clues) { err.textContent = (errPrefix || "Code") + " ungültig."; return null; }
   const tr = solveWithTrace(clues);
@@ -867,9 +890,15 @@ function loadPuzzleFromCode(code, errPrefix) {
   err.textContent = "";
   const canon = encodePuzzle(clues);
   currentPuzzle = { grid: tr.grid, clues, code: canon, clueCount: countClues(clues), trace: tr };
+  // Kalibrierungsinfo auch für Code-Loads (Fixture-Codes vergleichbar machen):
+  // Schwelle aus dem Kalibrier-Tab, hardCount frisch aus dem Trace — dieselbe
+  // Rechnung wie bei der Kalibrier-Generierung (dort: countHardSteps(trace, calibT)).
+  const threshold = clampInt(el("calib-threshold").value, 2, 9, 4);
+  currentPuzzle.calib = { threshold, hardCount: countHardSteps(tr, threshold) };
   renderPuzzle(currentPuzzle);
   document.getElementById("print-btn").disabled = false;
   document.getElementById("steps-btn").disabled = false;
+  document.getElementById("solution-btn").disabled = false;
   return tr.grid;
 }
 
@@ -1050,6 +1079,7 @@ function loadManualPuzzle() {
   renderPuzzle(currentPuzzle);
   document.getElementById("print-btn").disabled = false;
   document.getElementById("steps-btn").disabled = false;
+  document.getElementById("solution-btn").disabled = false;
   document.getElementById("error").textContent = "";
 }
 
@@ -1073,28 +1103,25 @@ document.getElementById("syntax-help-btn").addEventListener("click", () => {
   else dlg.setAttribute("open", "");
 });
 
-document.getElementById("reveal-btn").addEventListener("click", () => {
-  const code = document.getElementById("code-input").value;
-  // If the input matches the currently loaded puzzle, just reveal — no re-decode.
-  const clean = code.toUpperCase().replace(/[^A-Z0-9]/g, "");
-  const haveCurrent = currentPuzzle &&
-    currentPuzzle.code.replace(/[^A-Z0-9]/g, "") === clean && clean.length > 0;
-  let grid;
-  if (haveCurrent) {
-    document.getElementById("error").textContent = "";
-    grid = currentPuzzle.grid;
-  } else {
-    grid = loadPuzzleFromCode(code, "Code");
-    if (!grid) return;
-  }
-  exitStepMode();
-  showSolution(grid);
-  // Code-Tab sitzt oben, das Rätsel rendert darunter — Gitter sichtbar scrollen.
-  document.getElementById("grid").scrollIntoView({ behavior: "smooth", block: "center" });
+// "Rätsel laden" im Rätselcode-Tab: Code decodieren und die Seite in den
+// Frisch-generiert-Zustand bringen (leeres Gitter, Hinweise, QR, Editor-Sync).
+// Fehler landen panelnah in #code-error; nur bei gültigem Code zu den
+// Hinweisen scrollen.
+document.getElementById("code-load-btn").addEventListener("click", () => {
+  const grid = loadPuzzleFromCode(document.getElementById("code-input").value, "Code",
+    document.getElementById("code-error"));
+  if (!grid) return;
+  document.getElementById("hints-block").scrollIntoView({ behavior: "smooth", block: "start" });
 });
-document.getElementById("hide-btn").addEventListener("click", () => {
-  hideSolution();
-  document.getElementById("error").textContent = "";
+// Lösung-Toggle unter dem Gitter: zeigt/verbirgt die Lösung des aktuellen Rätsels.
+document.getElementById("solution-btn").addEventListener("click", () => {
+  if (!currentPuzzle) return;
+  if (solutionShown) {
+    hideSolution();
+  } else {
+    exitStepMode();
+    showSolution(currentPuzzle.grid);
+  }
 });
 document.getElementById("print-btn").addEventListener("click", () => window.print());
 document.getElementById("steps-btn").addEventListener("click", toggleSteps);
@@ -1110,7 +1137,8 @@ document.getElementById("step-list").addEventListener("click", (e) => {
 });
 
 // If URL contains ?code=…, auto-fill the input and load the puzzle.
-// The puzzle is shown empty — the recipient solves it (or clicks "Lösung zeigen").
+// The puzzle is shown empty — the recipient solves it (or uses the
+// "Lösung zeigen" toggle below the grid).
 (function applyCodeFromUrl() {
   const params = new URLSearchParams(location.search);
   const code = params.get("code");

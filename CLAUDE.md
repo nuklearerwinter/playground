@@ -78,11 +78,24 @@ Architectural points that are non-obvious from the code:
   gone; the UI is a single discrete 1–6 slider (`#level-slider`, with a live
   level-name label) in the "Stufe" tab — it only picks the *target* level;
   difficulty itself is still classified from the trace: Sehr leicht / Leicht /
-  Mittel / Schwer / Sehr schwer / Extrem. (Stufe / Kalibrierung / Editor / Code
-  are four `role="tablist"` tabs; `readConfig`/`syncModeUI` read the active tab.
-  "Editor" is the manual-entry panel, "Code" the puzzle-code input + Lösung
-  zeigen/verbergen; both hide the global "Rätsel generieren" button and load via
-  their own panel buttons.)
+  Mittel / Schwer / Sehr schwer / Extrem. (Stufe / Kalibrierung / Editor /
+  Rätselcode are four `role="tablist"` tabs — `data-mode` values stay
+  `level/calib/manual/code`; `readConfig`/`syncModeUI` read the active tab.
+  "Editor" is the manual-entry panel, "Rätselcode" the puzzle-code input +
+  "Rätsel laden" (loads via `loadPuzzleFromCode`, i.e. same fresh state as a
+  generated puzzle, then scrolls to the clues; load errors go to the
+  panel-local `#code-error`, NOT the global `#error` — that sits below the
+  puzzle, off-viewport at click time). Code-loaded puzzles ALSO get a
+  `calib` profile attached (threshold from the Kalibrierung tab's select,
+  `countHardSteps` fresh from the trace), so the difficulty display shows the
+  full calibration line for fixture codes — by design, even on ?code= URL
+  loads; both hide the global "Rätsel
+  generieren" button and load via their own panel buttons, and the Rätselcode
+  tab also hides "Drucken". Lösung zeigen/verbergen is a single toggle button
+  `#solution-btn` below the grid next to "Lösungsweg" — state lives in
+  `solutionShown`/`setSolutionShown`, and `showSolution`/`exitStepMode`/
+  `renderPuzzle` keep it consistent: solution view and step mode are mutually
+  exclusive, and every `renderPuzzle` resets both.)
   The real difficulty signal is **`b`, the per-step branching factor** —
   how many candidate configurations a human must survey to justify a step
   (recorded on every trace step by `commit`; the `lineFeasibility` step counts
@@ -216,7 +229,7 @@ Architectural points that are non-obvious from the code:
   that direct-sequence puzzles get a bundled fill).
 - **Manual puzzle entry (`parseManualLine` / `loadManualPuzzle`).** The
   **"Editor" tab** — one of the four mode tabs (Stufe / Kalibrierung /
-  Editor / Code) — is a `<div>` panel with 12 inputs (rows A–F + cols 1–6) that lets
+  Editor / Rätselcode) — is a `<div>` panel with 12 inputs (rows A–F + cols 1–6) that lets
   users transcribe magazine puzzles. (It used to be a collapsible `<details>`
   panel; it became a tab in the UI facelift, and `syncModeUI` shows exactly one
   panel per mode and hides the global "Rätsel generieren" button in Editor
