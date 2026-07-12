@@ -1688,6 +1688,35 @@ function solveWithTrace(clues) {
     }
   }
 
+  // Duplikat-Platzierung (nachbarschaftsbewusst) für EINE Linie; siehe den
+  // Kommentar an Aufrufstelle 5a. Auch vor jeder Linien-DFS (5b) aufgerufen,
+  // damit eine seit dem 5a-Durchlauf erst freigelegte erzwungene Platzierung
+  // dem billigen Schritt gutgeschrieben wird statt der DFS mit großem b.
+  const nonAdjPair = arr => { for (let i = 0; i < arr.length; i++) for (let j = i + 1; j < arr.length; j++) if (arr[j] - arr[i] >= 2) return true; return false; };
+  function dupPlaceLine(ls) {
+    const cells = ls.cells, lineLabel = ls.scope === "row" ? rowLabel(ls.index) : colLabel(ls.index);
+    for (let v = 1; v <= 9 && !bad; v++) {
+      if (!(ls.dupMask & bit(v))) continue;
+      const hosts = []; for (let p = 0; p < 6; p++) if (domains[cells[p]] & bit(v)) hosts.push(p);
+      if (!nonAdjPair(hosts)) { bad = true; break; }
+      const forced = [], stripped = [];
+      for (const p of hosts) {
+        if (!hosts.some(q => q !== p && Math.abs(q - p) >= 2)) { stripped.push(p); continue; }
+        if (!nonAdjPair(hosts.filter(q => q !== p))) forced.push(p);
+      }
+      const hostLabels = hosts.map(p => cl2(cells[p])).join(", ");
+      const clue = { value: v, cells: cells.slice(), hosts: hosts.slice(), scope: ls.scope, index: ls.index };
+      if (forced.length) {
+        begin(); for (const p of forced) keep(cells[p], bit(v));
+        commit("Die " + v + " kommt in " + lineLabel + " doppelt vor und passt nur in " + hostLabels + ". Weil zwei benachbarte Zellen nicht beide die " + v + " sein können, ist " + forced.map(p => cl2(cells[p])).join(", ") + " = " + v + " erzwungen.", "dup-place", clue);
+      }
+      if (stripped.length && !bad) {
+        begin(); for (const p of stripped) rmBit(cells[p], v);
+        commit("Die " + v + " kommt in " + lineLabel + " doppelt vor; in " + stripped.map(p => cl2(cells[p])).join(", ") + " hätte sie keinen nicht-benachbarten Partner — hier ausgeschlossen.", "dup-place", clue);
+      }
+    }
+  }
+
   // Propagation bis zum Fixpunkt. Jede Regelanwendung, die mindestens einen
   // Kandidaten entfernt, ergibt EINEN Schritt (mit Begründung + entfernten Werten).
   let guard = 0;
@@ -1785,34 +1814,7 @@ function solveWithTrace(clues) {
     //     Paar steckt, ist erzwungen; eine ohne nicht-benachbarten Partner scheidet
     //     aus. Das ist die billige menschliche Abkürzung, die die Feasibility-DFS
     //     sonst per Brute Force fände (5×2 passt B5/C5/F5, B5–C5 benachbart ⇒ F5=5).
-    {
-      const nonAdjPair = arr => { for (let i = 0; i < arr.length; i++) for (let j = i + 1; j < arr.length; j++) if (arr[j] - arr[i] >= 2) return true; return false; };
-      for (const ls of lineSearches) {
-        if (!ls.dupMask) continue;
-        const cells = ls.cells, lineLabel = ls.scope === "row" ? rowLabel(ls.index) : colLabel(ls.index);
-        for (let v = 1; v <= 9 && !bad; v++) {
-          if (!(ls.dupMask & bit(v))) continue;
-          const hosts = []; for (let p = 0; p < 6; p++) if (domains[cells[p]] & bit(v)) hosts.push(p);
-          if (!nonAdjPair(hosts)) { bad = true; break; }
-          const forced = [], stripped = [];
-          for (const p of hosts) {
-            if (!hosts.some(q => q !== p && Math.abs(q - p) >= 2)) { stripped.push(p); continue; }
-            if (!nonAdjPair(hosts.filter(q => q !== p))) forced.push(p);
-          }
-          const hostLabels = hosts.map(p => cl2(cells[p])).join(", ");
-          const clue = { value: v, cells: cells.slice(), hosts: hosts.slice(), scope: ls.scope, index: ls.index };
-          if (forced.length) {
-            begin(); for (const p of forced) keep(cells[p], bit(v));
-            commit("Die " + v + " kommt in " + lineLabel + " doppelt vor und passt nur in " + hostLabels + ". Weil zwei benachbarte Zellen nicht beide die " + v + " sein können, ist " + forced.map(p => cl2(cells[p])).join(", ") + " = " + v + " erzwungen.", "dup-place", clue);
-          }
-          if (stripped.length && !bad) {
-            begin(); for (const p of stripped) rmBit(cells[p], v);
-            commit("Die " + v + " kommt in " + lineLabel + " doppelt vor; in " + stripped.map(p => cl2(cells[p])).join(", ") + " hätte sie keinen nicht-benachbarten Partner — hier ausgeschlossen.", "dup-place", clue);
-          }
-        }
-        if (bad) break;
-      }
-    }
+    for (const ls of lineSearches) { if (ls.dupMask) dupPlaceLine(ls); if (bad) break; }
     if (bad) break;
     cascade(); if (bad) break;
     // 5a2. Distinktheits-Summen-Schranke: für jede Summen-Linie OHNE Duplikat
@@ -1898,6 +1900,17 @@ function solveWithTrace(clues) {
       // consequences of a cell solved by an earlier line (e.g. distinctness
       // striking a now-fixed value from this line) are credited to the cheap
       // rule — not re-derived by the feasibility enumeration with an inflated B.
+      cascade(); if (bad) break;
+      // Same idea for this line's own cheap b=1 rules: unit (dup/once hidden
+      // placement) and dupPlaceLine already ran this pass, but eliminations
+      // since (sumBound, earlier lines' DFS, cascades) may have narrowed the
+      // line so a placement is now forced — e.g. "die doppelte 1 passt nur
+      // noch in zwei Zellen". Without this re-run the DFS below re-derives
+      // that trivial step with a hugely inflated b (observed: b=32 statt 1).
+      if (ls.scope === "row") unit(k => ls.index * N + k, ls.dupMask, ls.onceMask, rowLabel(ls.index), "row");
+      else unit(k => k * N + ls.index, ls.dupMask, ls.onceMask, colLabel(ls.index), "col");
+      if (bad) break;
+      if (ls.dupMask) { dupPlaceLine(ls); if (bad) break; }
       cascade(); if (bad) break;
       if (ls.snap) {
         let dirty = false;
