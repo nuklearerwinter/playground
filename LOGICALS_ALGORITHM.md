@@ -144,13 +144,24 @@ Pro Durchlauf werden angewandt:
   2er-Kandidatenmenge `{a,b}` belegen zusammen `a` und `b` ⇒ beide fallen in
   allen übrigen Zellen der Linie weg. Der offensichtliche menschliche Schritt
   („diese beiden Zellen sind die 8 und die 9, also ist sonst hier nichts 8 oder
-  9"), `b=1`. **Nur sound, wenn das Paar den Duplikat-Wert der Linie ausschließt**
-  (`mask & dupMask` ⇒ überspringen — sonst könnten beide Zellen der doppelte Wert
-  sein). Läuft **vor** der Feasibility-DFS und auf **jeder** Linie (auch reinen
+  9"), `b=1`. **Der einfache Beide-Werte-Strike ist nur sound, wenn das Paar den
+  Duplikat-Wert der Linie ausschließt** (sonst könnten beide Zellen der doppelte
+  Wert sein). **Enthält das Paar den Duplikat-Wert `a`** (`{a,b}`, `b` kein
+  Duplikat — dann ist mindestens eine der beiden Zellen `a`, weil `b` höchstens
+  einmal passt), gelten stattdessen zwei duplikat-bewusste Deduktionen:
+  *benachbarte* Paarzellen können auch nicht beide `a` sein (Adjazenz) ⇒ eine
+  ist `a`, die andere `b` ⇒ nur `b` fällt im Rest der Linie weg; Paarzellen mit
+  **genau einer Zelle dazwischen** ⇒ die Mittelzelle kann nicht `a` sein (sonst
+  nähme die Adjazenz beiden Paarzellen das `a` und beide müssten `b` sein —
+  zweimal ein Nicht-Duplikat). Trace-ruleType `"dup-sandwich"`, beides `b=1`.
+  Läuft **vor** der Feasibility-DFS und auf **jeder** Linie (auch reinen
   pairSum/Distinktheits-Linien ohne DFS), sonst würde `sumBound`/Feasibility diese
-  triviale Streichung mit aufgeblähtem `B` beanspruchen. Greift auf einer
+  triviale Streichung mit aufgeblähtem `B` beanspruchen (beobachtet: `b=15` für
+  ein `{6,8}`-pairSum-Paar bzw. ein `{4,5}`-Sandwich). Greift auf einer
   DFS-losen Linie ⇒ kann das Gate ein paar **mehr** Rätsel akzeptieren (echt
-  deduzierbar, daher korrekt).
+  deduzierbar, daher korrekt); die duplikat-bewussten Fälle feuern nur auf
+  Duplikat-Linien (⊆ `lineSearches`, von der DFS ohnehin fixpunktiert) und
+  ändern daher nie die Akzeptanz, nur die `B`-Zurechnung.
 - **Linien-Feasibility-DFS**: Für jede Linie mit Summe und/oder Duplikat zählt
   eine DFS alle gültigen 6-Wert-Belegungen auf; Werte ohne Vorkommen werden
   gestrichen. Fängt extreme Summen + komplexere Duplikat-Fälle ab, die
@@ -264,7 +275,14 @@ bekannten Zelle in **einem gebündelten `"sequence"`-Schritt** komplett gefüllt
 ganz am Anfang des Trace** (b=1, „Die 5 kommt in Reihe C nicht vor — aus allen
 sechs Zellen streichen"), so wie ein Mensch das Gitter vorbereiten würde; der
 **once-Hidden-Single** erscheint als `"once-hidden-row"/"once-hidden-col"`-Schritt
-(b=1) in `unit`. Das ist zulässig, weil die Propagation konfluent/monoton
+(b=1) in `unit`. **Direkt vor jeder Linien-Feasibility-DFS werden die billigen
+b=1-Regeln der Linie erneut ausgeführt** (`unit`, `nakedPairLine`,
+`dupPlaceLine`, plus `cascade`): Streichungen aus derselben Runde (pairSum,
+`sumBound`, DFS anderer Linien) können die Linie inzwischen so verengt haben,
+dass eine triviale Deduktion frei liegt — ohne den Re-Run würde die DFS sie mit
+riesigem `b` beanspruchen (beobachtet: b=32 für eine erzwungene
+Duplikat-Platzierung, b=15 für ein nacktes Paar). Das alles ist zulässig, weil
+die Propagation konfluent/monoton
 ist (gleicher Fixpunkt, egal in welcher Reihenfolge) — `logicalSolve` (das
 Akzeptanz-Gate) bleibt unverändert.
 

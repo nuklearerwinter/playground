@@ -142,13 +142,27 @@ Architectural points that are non-obvious from the code:
   cells are the 8 and the 9, so nothing else here is 8 or 9" move, `b=1`). They
   reproduce the cheap human shortcuts the brute-force feasibility DFS was finding
   with a hugely inflated `b`; without them `maxB`/`b` over-classified sum puzzles
-  as too hard. **nakedPair is sound only when the pair EXCLUDES the line's
-  duplicate value** (`mask & dupMask` ⇒ skip: the two cells could both be the
-  doubled value, so neither value is necessarily consumed); it fires on EVERY line
-  (not just sum/dup lines), so unlike the other two it can let the gate accept a
+  as too hard. **The plain both-values strike is sound only when the pair
+  EXCLUDES the line's duplicate value** (the two cells could both be the doubled
+  value, so neither value is necessarily consumed). **If the pair CONTAINS the
+  dup value `a`** (`{a,b}`, `b` non-dup — so at least one pair cell is `a`,
+  since `b` fits at most once), two dup-aware deductions apply instead:
+  *adjacent* pair cells can't both be `a` either ⇒ one `a`, one `b` ⇒ strike
+  `b` (only) from the rest; pair cells with exactly ONE cell between them ⇒
+  that middle cell can't be `a` (adjacency would force both pair cells to `b`,
+  twice) — trace ruleType `"dup-sandwich"`, all `b=1`. (Two dup bits in the
+  mask ⇒ skip. These two came from a user report: a `{6,8}` pairSum pair and a
+  `{4,5}/{4,5}` sandwich were each being claimed by the feasibility DFS at
+  `b=15`.) nakedPair fires on EVERY line (not just sum/dup lines), so unlike
+  the other two it can let the gate accept a
   few more puzzles (ones needing a naked-pair on a plain pairSum/distinct line —
-  genuinely human-deducible, so correct). **Soundness is preserved by
+  genuinely human-deducible, so correct); the dup-aware cases fire only on dup
+  lines (⊆ `lineSearches`), which the DFS already fixpoints — so they change
+  classification (`b`), never acceptance. **Soundness is preserved by
   confluence** — these reorder which rule gets credit; the fixpoint is unchanged.
+  In `solveWithTrace`, `nakedPairLine` is also re-run per line directly before
+  that line's feasibility DFS (with `unit`/`dupPlaceLine`, see below) so a pair
+  formed mid-pass (e.g. by pairSum arc consistency) is still credited cheaply.
 - **`LEVELS` carries each level's generation `cfg`** (`minTotalSum`,
   `maxTotalSum`, `minDupLines`, `maxDupLines`, `fewerPairSums`, `maxOnceClues`,
   `maxAbsentClues`) which BIASES

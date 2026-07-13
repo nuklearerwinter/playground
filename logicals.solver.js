@@ -766,16 +766,38 @@ function workerCode() {
     }
     // Naked pair: two cells of a line restricted to the SAME 2-set {a,b} (and
     // neither the line's duplicate) must be a and b between them -> strike a,b
-    // from the rest of the line. Mirror of solveWithTrace's nakedPairLine; sound
-    // (confluent, same fixpoint) so the acceptance gate is unchanged.
+    // from the rest of the line. If the pair CONTAINS the duplicate value a,
+    // the cells could both be a — but two dup-aware deductions survive (both
+    // rest on "the non-dup b fits at most once, so at least one pair cell is a"):
+    //   adjacent pair: they can't both be a either (adjacency) -> one a, one b
+    //     -> b is consumed here, strike b (only) from the rest of the line;
+    //   pair with ONE cell between them: were that middle cell a, adjacency
+    //     would strip a from both pair cells, forcing b twice -> impossible,
+    //     strike a from the middle cell.
+    // Mirror of solveWithTrace's nakedPairLine; sound (confluent, same
+    // fixpoint) so the acceptance gate is unchanged.
     function nakedPair(cells, dupMask) {
       const groups = new Map();
       for (let p = 0; p < 6; p++) { const d = domains[cells[p]]; if (POPCOUNT[d] === 2) { if (!groups.has(d)) groups.set(d, []); groups.get(d).push(p); } }
       for (const [mask, pos] of groups) {
-        if (pos.length !== 2 || (mask & dupMask)) continue;
-        for (let p = 0; p < 6 && !bad; p++) {
-          if (p === pos[0] || p === pos[1]) continue;
-          for (let v = 1; v <= 9; v++) if (mask & (1 << (v - 1))) clearBit(cells[p], v);
+        if (pos.length !== 2) continue;
+        const dupBits = mask & dupMask;
+        if (!dupBits) {
+          for (let p = 0; p < 6 && !bad; p++) {
+            if (p === pos[0] || p === pos[1]) continue;
+            for (let v = 1; v <= 9; v++) if (mask & (1 << (v - 1))) clearBit(cells[p], v);
+          }
+          continue;
+        }
+        if (POPCOUNT[dupBits] !== 1) continue; // both values doubled: nothing forced
+        if (pos[1] - pos[0] === 1) {
+          const other = mask & ~dupBits;
+          for (let p = 0; p < 6 && !bad; p++) {
+            if (p === pos[0] || p === pos[1]) continue;
+            for (let v = 1; v <= 9; v++) if (other & (1 << (v - 1))) clearBit(cells[p], v);
+          }
+        } else if (pos[1] - pos[0] === 2) {
+          clearBit(cells[pos[0] + 1], minV(dupBits));
         }
       }
     }
@@ -1295,6 +1317,8 @@ const RULE_WEIGHT = {
   "global-hidden": 2,
   "global-dup-rows": 5, "global-dup-cols": 5,
   "dup-place": 2,
+  "naked-pair": 1,
+  "dup-sandwich": 1,
   "sumBound": 2,
   "pairSum": 2,
   "totalSum": 2,
@@ -1647,23 +1671,55 @@ function solveWithTrace(clues) {
   // Naked pair: two cells of a line whose candidate sets are the SAME 2-set
   // {a,b} must take a and b between them, so a and b are used up in this line —
   // strike both from the other cells. The obvious human move ("these two cells
-  // are the 8 and the 9, so no other cell here can be 8 or 9"), b=1. Sound only
-  // when the pair EXCLUDES the line's duplicate value: if a (or b) were the
-  // doubled value, the two cells could both be it, and the other value need not
-  // be placed here at all. (3+ cells sharing a 2-set are left to feasibility.)
+  // are the 8 and the 9, so no other cell here can be 8 or 9"), b=1.
+  // If the pair CONTAINS the line's duplicate value a, the two cells could both
+  // be a and the plain strike is unsound — but two dup-aware deductions remain
+  // (both rest on "the non-dup b fits at most once ⇒ at least one pair cell is a"):
+  //   adjacent pair: they can't both be a either (adjacency) ⇒ one is a, the
+  //     other b ⇒ b is consumed here — strike b (only) from the rest;
+  //   pair with ONE cell in between: were that middle cell a, adjacency would
+  //     strip a from both pair cells and force b twice ⇒ impossible — strike a
+  //     from the middle cell ("dup-sandwich").
+  // (3+ cells sharing a 2-set are left to feasibility.) Mirror of logicalSolve's
+  // nakedPair — change both together.
   function bitCount(d) { let n = 0; for (let v = 1; v <= 9; v++) if (d & bit(v)) n++; return n; }
   function nakedPairLine(cells, dupMask, label, scope) {
     const groups = new Map();
     for (let p = 0; p < 6; p++) { const d = domains[cells[p]]; if (bitCount(d) === 2) { if (!groups.has(d)) groups.set(d, []); groups.get(d).push(p); } }
     for (const [mask, pos] of groups) {
-      if (pos.length !== 2 || (mask & dupMask)) continue;
+      if (pos.length !== 2) continue;
       const vals = []; for (let v = 1; v <= 9; v++) if (mask & bit(v)) vals.push(v);
-      begin();
-      for (let p = 0; p < 6 && !bad; p++) { if (p === pos[0] || p === pos[1]) continue; for (const v of vals) rmBit(cells[p], v); }
-      commit(cl2(cells[pos[0]]) + " und " + cl2(cells[pos[1]]) + " können in " + label + " nur " + vals.join(" oder ") +
-        " sein — zwei Zellen für zwei Werte. Damit sind " + vals.join(" und ") + " hier vergeben und fallen in den übrigen Zellen weg.",
-        "naked-pair", { cells: cells.slice(), pair: [cells[pos[0]], cells[pos[1]]], values: vals, scope, label });
-      if (bad) return;
+      const P = cl2(cells[pos[0]]), Q = cl2(cells[pos[1]]);
+      const dupBits = mask & dupMask;
+      if (!dupBits) {
+        begin();
+        for (let p = 0; p < 6 && !bad; p++) { if (p === pos[0] || p === pos[1]) continue; for (const v of vals) rmBit(cells[p], v); }
+        commit(P + " und " + Q + " können in " + label + " nur " + vals.join(" oder ") +
+          " sein — zwei Zellen für zwei Werte. Damit sind " + vals.join(" und ") + " hier vergeben und fallen in den übrigen Zellen weg.",
+          "naked-pair", { cells: cells.slice(), pair: [cells[pos[0]], cells[pos[1]]], values: vals, scope, label });
+        if (bad) return;
+        continue;
+      }
+      if (bitCount(dupBits) !== 1) continue; // both values doubled: nothing forced
+      const dv = minV(dupBits), ov = vals[0] === dv ? vals[1] : vals[0];
+      if (pos[1] - pos[0] === 1) {
+        begin();
+        for (let p = 0; p < 6 && !bad; p++) { if (p === pos[0] || p === pos[1]) continue; rmBit(cells[p], ov); }
+        commit(P + " und " + Q + " können in " + label + " nur " + vals.join(" oder ") + " sein. Nebeneinander können sie nicht beide die doppelte " +
+          dv + " sein — also ist eine der beiden die " + dv + " und die andere die " + ov + ". Damit ist die " + ov +
+          " hier vergeben und fällt in den übrigen Zellen weg.",
+          "naked-pair", { cells: cells.slice(), pair: [cells[pos[0]], cells[pos[1]]], values: vals, scope, label });
+        if (bad) return;
+      } else if (pos[1] - pos[0] === 2) {
+        const mid = cells[pos[0] + 1];
+        begin();
+        rmBit(mid, dv);
+        commit(P + " und " + Q + " können in " + label + " nur " + vals.join(" oder ") + " sein. Wäre " + cl2(mid) + " die " + dv +
+          ", dürfte als direkter Nachbar keine der beiden die " + dv + " sein — beide müssten die " + ov + " sein, und die " + ov +
+          " kann in " + label + " nur einmal vorkommen. Also ist " + cl2(mid) + " keine " + dv + ".",
+          "dup-sandwich", { cells: cells.slice(), pair: [cells[pos[0]], cells[pos[1]]], values: vals, value: dv, middle: mid, scope, label });
+        if (bad) return;
+      }
     }
   }
 
@@ -1902,13 +1958,16 @@ function solveWithTrace(clues) {
       // rule — not re-derived by the feasibility enumeration with an inflated B.
       cascade(); if (bad) break;
       // Same idea for this line's own cheap b=1 rules: unit (dup/once hidden
-      // placement) and dupPlaceLine already ran this pass, but eliminations
-      // since (sumBound, earlier lines' DFS, cascades) may have narrowed the
-      // line so a placement is now forced — e.g. "die doppelte 1 passt nur
-      // noch in zwei Zellen". Without this re-run the DFS below re-derives
-      // that trivial step with a hugely inflated b (observed: b=32 statt 1).
+      // placement), nakedPairLine and dupPlaceLine already ran this pass, but
+      // eliminations since (pairSum, sumBound, earlier lines' DFS, cascades)
+      // may have narrowed the line so a placement is now forced — e.g. "die
+      // doppelte 1 passt nur noch in zwei Zellen", or a fresh {dup,x} naked
+      // pair. Without this re-run the DFS below re-derives that trivial step
+      // with a hugely inflated b (observed: b=32 bzw. b=15 statt 1).
       if (ls.scope === "row") unit(k => ls.index * N + k, ls.dupMask, ls.onceMask, rowLabel(ls.index), "row");
       else unit(k => k * N + ls.index, ls.dupMask, ls.onceMask, colLabel(ls.index), "col");
+      if (bad) break;
+      nakedPairLine(cells, ls.dupMask, ls.scope === "row" ? rowLabel(ls.index) : colLabel(ls.index), ls.scope);
       if (bad) break;
       if (ls.dupMask) { dupPlaceLine(ls); if (bad) break; }
       cascade(); if (bad) break;
