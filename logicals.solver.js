@@ -1300,44 +1300,6 @@ function workerCode() {
   };
 }
 
-// Phase 2B difficulty weighting. Approximates how much manual work a human
-// would invest to reproduce one application of the rule. Higher = harder.
-// The variety bonus rewards puzzles that exercise many distinct rule kinds.
-// The clue-count penalty offsets the natural bias of counting steps: more
-// clues mean more rule applications, but each clue also gives the human more
-// to start from. Calibrated empirically against the magazine demo (which sits
-// near the 80th percentile of generated puzzles at penalty 10).
-const RULE_WEIGHT = {
-  "adjacency": 1,
-  "absent": 1,
-  "distinct-row": 1, "distinct-col": 1,
-  "dup-hidden-row": 2, "dup-hidden-col": 2,
-  "once-hidden-row": 2, "once-hidden-col": 2,
-  "global": 2,
-  "global-hidden": 2,
-  "global-dup-rows": 5, "global-dup-cols": 5,
-  "dup-place": 2,
-  "naked-pair": 1,
-  "dup-sandwich": 1,
-  "sumBound": 2,
-  "pairSum": 2,
-  "totalSum": 2,
-  "sequence": 3,
-  "lineFeasibility": 8,
-};
-const RULE_VARIETY_BONUS = 5;
-const CLUE_PENALTY = 10;
-function puzzleDifficulty(trace, clueCount) {
-  if (!trace || !trace.steps) return 0;
-  let score = 0;
-  const types = new Set();
-  for (const s of trace.steps) {
-    score += RULE_WEIGHT[s.ruleType] || 1;
-    types.add(s.ruleType);
-  }
-  return score + RULE_VARIETY_BONUS * types.size - CLUE_PENALTY * (clueCount || 0);
-}
-
 // Difficulty PROFILE from the per-step branching factor `b` (see commit()).
 // `maxB` is the single hardest survey a solver must do; `bands` counts how many
 // steps exceed each B threshold. A difficulty LEVEL is a ceiling on maxB plus

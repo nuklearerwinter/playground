@@ -285,7 +285,9 @@ Architectural points that are non-obvious from the code:
 - **No automated tests in-repo, but the logic is testable in Node** — and the
   file split makes it easy. `logicals.solver.js` is DOM-free, so `vm`-eval the
   whole file and grab its top-level symbols (append
-  `;Object.assign(this,{workerCode,solveWithTrace,encodePuzzle,decodePuzzle,puzzleDifficulty,countClues,N})`).
+  `;Object.assign(this,{workerCode,solveWithTrace,encodePuzzle,decodePuzzle,puzzleProfile,puzzleLevel,clueFeatures,countClues,N})`).
+  (There is a ready-made repo harness — `node logicals.test.js [perLevel]` — that
+  does exactly this and asserts the invariants below.)
   For the worker internals, extract the `workerCode()` body from the loaded
   function (`workerCode.toString()`, strip the outer `function(){…}`) and wrap
   it in `new Function("self", body + "; return { generateGrid, pickClues,
