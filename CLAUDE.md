@@ -31,7 +31,17 @@ Architectural points that are non-obvious from the code:
   loaded into a `Worker`. That means **anything inside `workerCode` cannot
   reference outer-scope variables** — it lives in a different JavaScript realm
   at runtime. Constants (`N`, helpers) are duplicated on purpose. (The QR-code
-  library lives in `qrcode.min.js`.)
+  library lives in `qrcode.min.js`.) **Exception — realm-portable shared helpers:**
+  `distinctSumRange` and `enumerateLine` (the line-feasibility enumerator) are
+  defined at solver top level and take ALL state as arguments (no outer-scope
+  refs), so the SAME source runs in both realms. `WORKER_SHARED_SRC`
+  (`= distinctSumRange.toString() + enumerateLine.toString()`) is the canonical
+  list; `logicals.app.js` builds the worker as
+  `WORKER_SHARED_SRC + "(" + workerCode.toString() + ")();"`, and every Node test
+  loader must prepend it identically (see `logicals.test.js`). This is what lets
+  the gate (`logicalSolve`, in the worker) and the trace (`solveWithTrace`, main
+  thread) share ONE copy of that logic — the thing that guarantees they enumerate
+  identically. **Add any new shared helper's `.toString()` to `WORKER_SHARED_SRC`.**
 - **Acceptance = deducible, not just unique.** A unique solution can still
   require guessing; that produces puzzles a human can't finish ("used every
   clue, still stuck"). The gate is `logicalSolve` — a propagation-only solver
@@ -290,9 +300,12 @@ Architectural points that are non-obvious from the code:
   does exactly this and asserts the invariants below.)
   For the worker internals, extract the `workerCode()` body from the loaded
   function (`workerCode.toString()`, strip the outer `function(){…}`) and wrap
-  it in `new Function("self", body + "; return { generateGrid, pickClues,
-  logicalSolve, buildCandidateClues };")({})`. Then batch-generate (mirror the
-  worker: random `numSequences` 1–3, `pickClues(grid, {targetClues:0})`).
+  it in `new Function("self", WORKER_SHARED_SRC + body + "; return { generateGrid,
+  pickClues, logicalSolve, buildCandidateClues };")({})` — **you MUST prepend
+  `WORKER_SHARED_SRC`** (the shared `distinctSumRange`/`enumerateLine` helpers),
+  exactly as `logicals.app.js` does, or `logicalSolve` throws `ReferenceError` the
+  first time it hits a feasibility line. Then batch-generate (mirror the worker:
+  random `numSequences` 1–3, `pickClues(grid, {targetClues:0})`).
   **Gotcha:** `pickClues` returns the *structured* clue set
   `{rowClues, colClues}` (lists per line) — not a flat array — and
   `logicalSolve` / `solveWithTrace` / `encodePuzzle` / `countClues` all consume

@@ -2,7 +2,10 @@
 // DOM, worker orchestration, UI. Requires logicals.solver.js loaded first.
 
 // === Main-thread: worker management + UI ===
-const WORKER_SRC = `(${workerCode.toString()})();`;
+// Prepend the shared realm-portable helpers (distinctSumRange, enumerateLine) so
+// the worker gate can call them — they live at solver top level, outside the
+// toString()'d workerCode realm. WORKER_SHARED_SRC is the canonical list.
+const WORKER_SRC = `${WORKER_SHARED_SRC}(${workerCode.toString()})();`;
 let workerBlobUrl = null;
 function getWorkerUrl() {
   if (!workerBlobUrl) {

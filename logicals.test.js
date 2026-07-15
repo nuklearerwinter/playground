@@ -26,14 +26,16 @@ const SOLVER = path.join(__dirname, "logicals.solver.js");
 function loadSolver(file) {
   const src = fs.readFileSync(file, "utf8") +
     ";Object.assign(this,{workerCode,solveWithTrace,encodePuzzle,decodePuzzle," +
-    "countClues,N,puzzleProfile,puzzleLevel,clueFeatures,LEVELS});";
+    "countClues,N,puzzleProfile,puzzleLevel,clueFeatures,LEVELS,WORKER_SHARED_SRC});";
   const ctx = { console, Math };
   vm.createContext(ctx);
   vm.runInContext(src, ctx, { filename: file });
   const fnSrc = ctx.workerCode.toString();
   const body = fnSrc.slice(fnSrc.indexOf("{") + 1, fnSrc.lastIndexOf("}"));
+  // Mirror app.js's worker packaging: prepend the shared realm-portable helpers
+  // (WORKER_SHARED_SRC) so the reconstructed worker gate can call them.
   const worker = new Function("self",
-    body + "\n;return { generateGrid, pickClues, logicalSolve, buildCandidateClues };")({});
+    (ctx.WORKER_SHARED_SRC || "") + body + "\n;return { generateGrid, pickClues, logicalSolve, buildCandidateClues };")({});
   return { top: ctx, worker };
 }
 

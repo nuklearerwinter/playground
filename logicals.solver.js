@@ -325,6 +325,90 @@ function countClues(clues) {
   return n;
 }
 
+// === Shared pure solver helpers (realm-portable) ===
+// These take ALL state as arguments (no outer-scope references), so the SAME
+// source runs in both realms: the main thread calls them directly (solveWithTrace),
+// and the worker gate (logicalSolve, inside workerCode's toString()'d realm) uses
+// them because app.js — and every Node test loader — prepends WORKER_SHARED_SRC
+// (below) to the worker blob. Keeping ONE copy is what guarantees the gate and the
+// trace enumerate identically (the "logicalSolve grid == solveWithTrace grid"
+// contract); duplicating them was a standing divergence risk.
+
+// Min/max sum of choosing DISTINCT values (one per domain in `doms`, none equal
+// `forbidden`, all distinct) via memoised DP over (cellIndex, usedMask).
+// [Infinity, -Infinity] if no distinct system of representatives exists.
+function distinctSumRange(doms, forbidden) {
+  const n = doms.length, fb = forbidden ? 1 << (forbidden - 1) : 0;
+  const memo = new Map();
+  function go(i, used, wantMin) {
+    if (i === n) return 0;
+    const key = (i << 10) | (used << 1) | (wantMin ? 1 : 0);
+    if (memo.has(key)) return memo.get(key);
+    let best = wantMin ? Infinity : -Infinity;
+    for (let v = 1; v <= 9; v++) {
+      const b = 1 << (v - 1);
+      if (!(doms[i] & b) || (used & b) || (b & fb)) continue;
+      const sub = go(i + 1, used | b, wantMin);
+      if (sub === Infinity || sub === -Infinity) continue;
+      const tot = v + sub;
+      if (wantMin ? tot < best : tot > best) best = tot;
+    }
+    memo.set(key, best); return best;
+  }
+  return [go(0, 0, true), go(0, 0, false)];
+}
+
+// Line feasibility enumeration: over the 6 cells of a line, enumerate every valid
+// assignment (six distinct values 1..9; the duplicate value — if any — exactly
+// twice and never at line-adjacent positions; each once value exactly once; the
+// totalSum, if any, must be hit) and OR each cell's surviving values into
+// `support`. With wantCombos, also collect the distinct value-MULTISETS (for the
+// trace's b). `domains` is any indexable of 9-bit masks; `cells` maps position→index.
+function enumerateLine(domains, cells, dupMask, onceMask, target, wantCombos) {
+  const support = [0, 0, 0, 0, 0, 0];
+  const assigned = [0, 0, 0, 0, 0, 0];
+  const usage = new Int8Array(10);
+  const combos = wantCombos ? new Set() : null;
+  function search(i, sumSoFar, dupLastPos) {
+    if (i === 6) {
+      if (target >= 0 && sumSoFar !== target) return;
+      for (let v = 1; v <= 9; v++) {
+        const b = 1 << (v - 1);
+        if ((dupMask & b) && usage[v] !== 2) return;
+        if ((onceMask & b) && usage[v] !== 1) return;
+      }
+      if (combos) combos.add(assigned.slice().sort((x, y) => x - y).join(","));
+      for (let j = 0; j < 6; j++) support[j] |= 1 << (assigned[j] - 1);
+      return;
+    }
+    if (target >= 0) {
+      const rem = 6 - i;
+      if (sumSoFar + rem * 9 < target) return;
+      if (sumSoFar + rem * 1 > target) return;
+    }
+    const d = domains[cells[i]];
+    for (let v = 1; v <= 9; v++) {
+      const b = 1 << (v - 1);
+      if (!(d & b)) continue;
+      const maxCount = (dupMask & b) ? 2 : 1;
+      if (usage[v] >= maxCount) continue;
+      if ((dupMask & b) && dupLastPos === i - 1) continue;
+      assigned[i] = v;
+      usage[v]++;
+      search(i + 1, sumSoFar + v, (dupMask & b) ? i : dupLastPos);
+      usage[v]--;
+    }
+  }
+  search(0, 0, -2);
+  return { support: support, combos: combos };
+}
+
+// Canonical source prepended to the worker blob so the gate (logicalSolve, in
+// workerCode's realm) can call the shared helpers above. app.js builds the worker
+// as WORKER_SHARED_SRC + "(" + workerCode.toString() + ")();"; Node test loaders
+// must prepend this identically. Add any new shared helper's .toString() here.
+const WORKER_SHARED_SRC = distinctSumRange.toString() + "\n" + enumerateLine.toString() + "\n";
+
 // === Worker code (self-contained; runs in a Web Worker) ===
 function workerCode() {
   "use strict";
@@ -740,30 +824,10 @@ function workerCode() {
       }
     }
 
-    // Min/max sum of distinct values (one per domain in `doms`, none equal
-    // `forbidden`, all distinct) via DP over (cellIndex, usedMask). The
-    // distinctness-aware sum bound — strictly stronger than the per-cell min/max
-    // totalSum rule, and the cheap shortcut behind many feasibility eliminations.
-    function distinctSumRange(doms, forbidden) {
-      const n = doms.length, fb = forbidden ? 1 << (forbidden - 1) : 0;
-      const memo = new Map();
-      function go(i, used, wantMin) {
-        if (i === n) return 0;
-        const key = (i << 10) | (used << 1) | (wantMin ? 1 : 0);
-        if (memo.has(key)) return memo.get(key);
-        let best = wantMin ? Infinity : -Infinity;
-        for (let v = 1; v <= 9; v++) {
-          const b = 1 << (v - 1);
-          if (!(doms[i] & b) || (used & b) || (b & fb)) continue;
-          const sub = go(i + 1, used | b, wantMin);
-          if (sub === Infinity || sub === -Infinity) continue;
-          const tot = v + sub;
-          if (wantMin ? tot < best : tot > best) best = tot;
-        }
-        memo.set(key, best); return best;
-      }
-      return [go(0, 0, true), go(0, 0, false)];
-    }
+    // distinctSumRange (distinctness-aware sum bound, used by sumBound below) is a
+    // shared realm-portable helper defined at solver top level and prepended to
+    // this worker via WORKER_SHARED_SRC — see the "Shared pure solver helpers"
+    // section. (Kept out of here so the gate and the trace share ONE copy.)
     // Naked pair: two cells of a line restricted to the SAME 2-set {a,b} (and
     // neither the line's duplicate) must be a and b between them -> strike a,b
     // from the rest of the line. If the pair CONTAINS the duplicate value a,
@@ -937,45 +1001,9 @@ function workerCode() {
           for (let j = 0; j < 6; j++) if (domains[cells[j]] !== ls.snap[j]) { dirty = true; break; }
           if (!dirty) continue;
         }
-        const dupMask = ls.dupMask;
-        const onceMask = ls.onceMask;
-        const target = ls.totalSum; // -1 if no totalSum clue
-        const support = [0, 0, 0, 0, 0, 0];
-        const assigned = [0, 0, 0, 0, 0, 0];
-        const usage = new Int8Array(10);
-        function search(i, sumSoFar, dupLastPos) {
-          if (i === 6) {
-            if (target >= 0 && sumSoFar !== target) return;
-            // Each duplicate value must appear EXACTLY twice (not 0 or 1),
-            // each once value exactly once (≤1 is enforced during descent).
-            for (let v = 1; v <= 9; v++) {
-              const b = 1 << (v - 1);
-              if ((dupMask & b) && usage[v] !== 2) return;
-              if ((onceMask & b) && usage[v] !== 1) return;
-            }
-            for (let j = 0; j < 6; j++) support[j] |= 1 << (assigned[j] - 1);
-            return;
-          }
-          if (target >= 0) {
-            const rem = 6 - i;
-            if (sumSoFar + rem * 9 < target) return;
-            if (sumSoFar + rem * 1 > target) return;
-          }
-          const d = domains[cells[i]];
-          for (let v = 1; v <= 9; v++) {
-            const b = 1 << (v - 1);
-            if (!(d & b)) continue;
-            const maxCount = (dupMask & b) ? 2 : 1;
-            if (usage[v] >= maxCount) continue;
-            if ((dupMask & b) && dupLastPos === i - 1) continue;
-            assigned[i] = v;
-            usage[v]++;
-            const newDupLast = (dupMask & b) ? i : dupLastPos;
-            search(i + 1, sumSoFar + v, newDupLast);
-            usage[v]--;
-          }
-        }
-        search(0, 0, -2);
+        // Shared realm-portable enumerator (see WORKER_SHARED_SRC). The gate
+        // needs only the per-cell support union, not the combination count.
+        const support = enumerateLine(domains, cells, ls.dupMask, ls.onceMask, ls.totalSum, false).support;
         for (let j = 0; j < 6 && !bad; j++) restrict(cells[j], support[j]);
         if (bad) break;
         // Snapshot post-DFS domains so the next iteration can skip if nothing
@@ -1594,29 +1622,11 @@ function solveWithTrace(clues) {
     }
   }
 
-  // Min and max sum of choosing DISTINCT values (one per cell-domain in `doms`,
-  // none equal `forbidden`, all distinct), via DP over (cellIndex, usedMask).
-  // [Infinity, -Infinity] if no distinct system of representatives exists.
-  function distinctSumRange(doms, forbidden) {
-    const n = doms.length, fb = forbidden ? bit(forbidden) : 0;
-    const memo = new Map();
-    function go(i, used, wantMin) {
-      if (i === n) return 0;
-      const key = (i << 10) | (used << 1) | (wantMin ? 1 : 0);
-      if (memo.has(key)) return memo.get(key);
-      let best = wantMin ? Infinity : -Infinity;
-      for (let v = 1; v <= 9; v++) {
-        const b = bit(v);
-        if (!(doms[i] & b) || (used & b) || (b & fb)) continue;
-        const sub = go(i + 1, used | b, wantMin);
-        if (sub === Infinity || sub === -Infinity) continue;
-        const tot = v + sub;
-        if (wantMin ? tot < best : tot > best) best = tot;
-      }
-      memo.set(key, best); return best;
-    }
-    return [go(0, 0, true), go(0, 0, false)];
-  }
+  // distinctSumRange (distinct-value min/max sum DP) and enumerateLine (line
+  // feasibility enumeration) are shared realm-portable helpers defined at solver
+  // top level (see the "Shared pure solver helpers" section) — the SAME source the
+  // worker gate uses, so gate and trace enumerate identically. Called directly here
+  // (main thread). distinctSumWitness below stays trace-only (it builds reason text).
   // Witness for distinctSumRange: the actual distinct assignment of `cellIdxs`
   // (one value each, all different, none = `forbidden`) achieving the min (or
   // max) total — so the sumBound reason can NAME why the bound is what it is
@@ -1946,49 +1956,14 @@ function solveWithTrace(clues) {
       const dupMask = ls.dupMask;
       const onceMask = ls.onceMask;
       const target = ls.totalSum;
-      const support = [0, 0, 0, 0, 0, 0];
-      const assigned = [0, 0, 0, 0, 0, 0];
-      const usage = new Int8Array(10);
       // B = the human's survey size = the number of distinct value-COMBINATIONS
-      // (multisets) that fill this line, NOT the number of ordered cell
-      // assignments. A person reasons "which sets of values fit here?", then
-      // places them; they don't re-survey every permutation. Counting orderings
-      // inflated B ~3-10× (e.g. a duplicate line's two equal values plus the
-      // distinct rest permute many ways for one and the same combination), which
-      // made forced/near-forced lines look far harder than they are.
-      const combos = new Set();
-      function search(i, sumSoFar, dupLastPos) {
-        if (i === 6) {
-          if (target >= 0 && sumSoFar !== target) return;
-          for (let v = 1; v <= 9; v++) {
-            const b = 1 << (v - 1);
-            if ((dupMask & b) && usage[v] !== 2) return;
-            if ((onceMask & b) && usage[v] !== 1) return;
-          }
-          combos.add(assigned.slice().sort((x, y) => x - y).join(","));
-          for (let j = 0; j < 6; j++) support[j] |= 1 << (assigned[j] - 1);
-          return;
-        }
-        if (target >= 0) {
-          const rem = 6 - i;
-          if (sumSoFar + rem * 9 < target) return;
-          if (sumSoFar + rem * 1 > target) return;
-        }
-        const d = domains[cells[i]];
-        for (let v = 1; v <= 9; v++) {
-          const b = 1 << (v - 1);
-          if (!(d & b)) continue;
-          const maxCount = (dupMask & b) ? 2 : 1;
-          if (usage[v] >= maxCount) continue;
-          if ((dupMask & b) && dupLastPos === i - 1) continue;
-          assigned[i] = v;
-          usage[v]++;
-          const newDupLast = (dupMask & b) ? i : dupLastPos;
-          search(i + 1, sumSoFar + v, newDupLast);
-          usage[v]--;
-        }
-      }
-      search(0, 0, -2);
+      // (multisets) that fill this line (via the shared enumerateLine, wantCombos),
+      // NOT ordered cell assignments — a person reasons "which sets of values fit?",
+      // not permutations (counting orderings inflated B ~3-10×). Same enumerator as
+      // the gate (WORKER_SHARED_SRC), so gate and trace agree on the support.
+      const enumRes = enumerateLine(domains, cells, dupMask, onceMask, target, true);
+      const support = enumRes.support;
+      const combos = enumRes.combos;
       // b for a dup-ONLY line (duplicate clue, no totalSum) is the human's
       // dup-PLACEMENT survey — how many non-adjacent position pairs the doubled
       // value can still occupy — NOT the full value-multiset count. The multiset
