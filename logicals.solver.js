@@ -1357,7 +1357,12 @@ function puzzleProfile(trace) {
     // real "which of ≥3 value-sets fits?" decision); b≤2 feasibility steps are
     // essentially forced and don't make a puzzle hard (per-level nFeasHard means
     // ≈ L3:0.4 / L4:0.6 / L5:1.3). nFeas (all feasibility steps) is kept for info.
-    if (s.ruleType === "lineFeasibility") { prof.nFeas++; if (b >= 3) prof.nFeasHard++; }
+    // A dup-only line's feasibility step is a dup-PLACEMENT survey (b = non-adjacent
+    // position pairs for the doubled value), much lighter than a genuine multi-VALUE
+    // combination survey — so it does NOT stack into nFeasHard (byWork); its
+    // difficulty still surfaces via maxB (byB). Only real value-combination surveys
+    // (dup+sum, plain/once totalSum lines) count toward nFeasHard.
+    if (s.ruleType === "lineFeasibility") { prof.nFeas++; if (b >= 3 && !(s.clue && s.clue.dupPos)) prof.nFeasHard++; }
   }
   return prof;
 }
@@ -2022,10 +2027,26 @@ function solveWithTrace(clues) {
         }
       }
       search(0, 0, -2);
+      // b for a dup-ONLY line (duplicate clue, no totalSum) is the human's
+      // dup-PLACEMENT survey — how many non-adjacent position pairs the doubled
+      // value can still occupy — NOT the full value-multiset count. The multiset
+      // count over-inflates b (observed up to ~70) for what a person actually
+      // reads as "where do the two d's go?" (a handful of non-adjacent slots).
+      // That inflation was the cause of dup-only lines being mis-rated Extrem/
+      // Sehr schwer. dup+sum and plain/once totalSum lines keep the multiset
+      // survey (there the human really does weigh value combinations).
+      let bFeas = combos.size;
+      const dupPosSurvey = !!(dupMask && target < 0);
+      if (dupPosSurvey) {
+        let dv = 0; for (let v = 1; v <= 9; v++) if (dupMask & (1 << (v - 1))) { dv = v; break; }
+        const hp = []; for (let p = 0; p < 6; p++) if (domains[cells[p]] & (1 << (dv - 1))) hp.push(p);
+        let pp = 0; for (let a = 0; a < hp.length; a++) for (let bIdx = a + 1; bIdx < hp.length; bIdx++) if (hp[bIdx] - hp[a] >= 2) pp++;
+        bFeas = Math.max(1, pp);
+      }
       begin();
       for (let j = 0; j < 6 && !bad; j++) keep(cells[j], support[j]);
       commit("Diese Werte passen in keine gültige Belegung dieser Linie.", "lineFeasibility",
-        { cells: cells.slice(), value: target, dupMask: dupMask, onceMask: onceMask, scope: ls.scope, index: ls.index }, combos.size);
+        { cells: cells.slice(), value: target, dupMask: dupMask, onceMask: onceMask, scope: ls.scope, index: ls.index, dupPos: dupPosSurvey }, bFeas);
       if (bad) break;
       if (!ls.snap) ls.snap = new Array(6);
       for (let j = 0; j < 6; j++) ls.snap[j] = domains[cells[j]];

@@ -637,6 +637,20 @@ function combosHtmlForStep(step, dom) {
     const target = (typeof cl.value === "number") ? cl.value : -1;
     const dupMask = cl.dupMask | 0;
     const onceMask = cl.onceMask | 0;
+    // Dup-ONLY line: the survey a person does is WHERE the two copies of the
+    // doubled value go (non-adjacent position pairs), not which value-multiset
+    // fills the line — matches the b metric (see solveWithTrace). List those
+    // placements instead of value combinations.
+    if (cl.dupPos && dupMask) {
+      let dv = 0; for (let v = 1; v <= 9; v++) if (dupMask & (1 << (v - 1))) { dv = v; break; }
+      const hosts = []; for (let p = 0; p < 6; p++) if (doms[p] & (1 << (dv - 1))) hosts.push(p);
+      const pairs = [];
+      for (let a = 0; a < hosts.length; a++) for (let b = a + 1; b < hosts.length; b++)
+        if (hosts[b] - hosts[a] >= 2) pairs.push([hosts[a], hosts[b]]);
+      const labP = p => cellLabel((cells[p] / N) | 0, cells[p] % N);
+      const kind = "Platzierungen der doppelten " + dv;
+      return listOrCount(pairs, pr => `<b>${labP(pr[0])} + ${labP(pr[1])}</b>`, kind) + whyStruck(kind);
+    }
     // List distinct value-COMBINATIONS (multisets), not ordered assignments —
     // matches the B metric (combos.size in solveWithTrace) and how a person
     // surveys the line. Dedup orderings via a sorted-key set.

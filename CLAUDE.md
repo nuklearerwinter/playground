@@ -103,11 +103,20 @@ Architectural points that are non-obvious from the code:
   ordered cell-assignments: a person surveys "which sets of values fit", not
   their permutations. Counting orderings inflated `b` ~3–10× — e.g. a dup line's
   two equal values plus the distinct rest permute many ways for one combination —
-  and made forced lines look far harder than they are. All cheap/forced rules are
-  `b=1`; `sumBound` and `sequence` steps are `1+openCells` resp. `~half` of that —
-  sequences are easier). `puzzleProfile` → `{ maxB, bands, nFeas, nFeasHard }`
-  (band counts of `#(b>3/5/8/12/20/30)`; `nFeas` = all lineFeasibility steps,
-  `nFeasHard` = those with `b≥3`). A level is `puzzleLevel(profile,
+  and made forced lines look far harder than they are. **Exception — a dup-ONLY
+  line (duplicate clue, NO totalSum): `b` is the dup-PLACEMENT survey = the number
+  of non-adjacent position pairs the doubled value can still occupy, NOT the
+  value-multiset count.** The multiset count over-inflated `b` there (observed up
+  to ~70) for what a person reads as "where do the two d's go?" (a handful of
+  slots) — that was the cause of dup-only lines being mis-rated Extrem/Sehr
+  schwer. dup+sum and plain/once totalSum lines keep the multiset survey. All
+  cheap/forced rules are `b=1`; `sumBound` and `sequence` steps are `1+openCells`
+  resp. `~half` of that — sequences are easier). `puzzleProfile` →
+  `{ maxB, bands, nFeas, nFeasHard }` (band counts of `#(b>3/5/8/12/20/30)`;
+  `nFeas` = all lineFeasibility steps, `nFeasHard` = those with `b≥3` **excluding
+  dup-placement surveys** (`clue.dupPos`) — a dup-only placement survey is much
+  lighter than a genuine multi-VALUE combination survey, so it does NOT stack into
+  byWork; its difficulty still surfaces via `maxB`). A level is `puzzleLevel(profile,
   clueFeatures(clues)) = max(byMaxB, byWork, floorByClueType)`:
   - **byMaxB** (single hardest survey): on plain lines `maxB` is small, but a
     sum-constrained line's combination survey can reach the tens (observed up to

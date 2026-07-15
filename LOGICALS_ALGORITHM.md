@@ -321,12 +321,22 @@ Wert-KOMBINATIONEN (Multisets)**, die die Linie füllen — NICHT die geordneten
 Zell-Belegungen: ein Mensch überlegt „welche Zahlenmengen passen", nicht ihre
 Permutationen. Permutationen aufzuzählen blähte `b` ~3–10× auf (die zwei gleichen
 Werte einer Dup-Linie plus der distinkte Rest permutieren vielfach für *eine*
-Kombination) und ließ erzwungene Linien viel schwerer wirken. Billige/erzwungene
+Kombination) und ließ erzwungene Linien viel schwerer wirken. **Ausnahme — eine
+Dup-ONLY-Linie (Duplikat-Hinweis, KEIN totalSum): `b` ist der Dup-PLATZIERUNGS-
+Survey = Anzahl der nicht-benachbarten Positionspaare, die der doppelte Wert noch
+einnehmen kann, NICHT die Wert-Multimengen-Zahl.** Die Multimengen-Zahl blähte `b`
+dort massiv auf (beobachtet bis ~70) für das, was ein Mensch als „wohin die zwei
+d?" liest (eine Handvoll Plätze) — das war die Ursache, dass dup-only-Linien als
+Extrem/Sehr schwer fehleingestuft wurden. Dup+Sum- und einfache/once-totalSum-
+Linien behalten den Multimengen-Survey. Billige/erzwungene
 Regeln sind `b=1`, `sumBound` ist `1+offene Zellen`, `sequence` ≈ die Hälfte
 davon (Sequenzen sind leichter). `puzzleProfile(trace)` →
 `{ maxB, bands, nFeas, nFeasHard }` (`maxB` = härtester Einzelschritt; `bands` =
 Zähler `#(b>3/5/8/12/20/30)`; `nFeas` = alle `lineFeasibility`-Schritte;
-`nFeasHard` = jene mit `b≥3`).
+`nFeasHard` = jene mit `b≥3`, **ausgenommen Dup-Platzierungs-Surveys**
+(`clue.dupPos`) — ein Dup-Platzierungs-Survey ist viel leichter als ein echter
+Mehr-WERT-Kombinationen-Survey und geht daher NICHT in die Arbeits-Achse ein;
+seine Schwierigkeit zeigt sich weiterhin über `maxB`).
 
 **`puzzleLevel = max(StufeAusMaxB, StufeAusArbeit, StufeAusHinweistyp)`** — drei
 Achsen, weil keine einzelne alle fünf Stufen spannt. Durch die
