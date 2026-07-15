@@ -70,8 +70,10 @@ Architectural points that are non-obvious from the code:
   hidden single covers the human-reasonable deduction; rules only need to be
   sound, not complete). Per (line, value) dup/once/absent are pairwise
   exclusive — editor and `decodePuzzle` validate, both solvers carry a
-  disjointness guard. NB: the feasibility DFS exists in THREE places that must
-  mirror: `logicalSolve`, `solveWithTrace`, and `combosHtmlForStep` (app.js).
+  disjointness guard. NB: the feasibility DFS is now a SINGLE shared function
+  `enumerateLine` (see WORKER_SHARED_SRC) called by all three consumers —
+  `logicalSolve` (gate), `solveWithTrace` (trace/b), and `combosHtmlForStep`
+  (app.js display); there is no longer a per-site copy to keep in sync.
 - **Clue selection minimises; `pickClues` is always called with
   `{ targetClues: 0, ... }`.** Start with all candidate clues (gated by
   `logicalSolve`), greedily remove while still deducible (fullest lines first,

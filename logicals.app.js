@@ -654,51 +654,19 @@ function combosHtmlForStep(step, dom) {
       const kind = "Platzierungen der doppelten " + dv;
       return listOrCount(pairs, pr => `<b>${labP(pr[0])} + ${labP(pr[1])}</b>`, kind) + whyStruck(kind);
     }
-    // List distinct value-COMBINATIONS (multisets), not ordered assignments —
-    // matches the B metric (combos.size in solveWithTrace) and how a person
-    // surveys the line. Dedup orderings via a sorted-key set.
-    const cap = 30, out = [], seenCombo = new Set();
-    const usage = new Int8Array(10);
-    const assigned = [0, 0, 0, 0, 0, 0];
-    function rec(i, sumSoFar, dupLastPos) {
-      if (out.length >= cap) return;
-      if (i === 6) {
-        if (target >= 0 && sumSoFar !== target) return;
-        for (let v = 1; v <= 9; v++) {
-          const b = 1 << (v - 1);
-          if ((dupMask & b) && usage[v] !== 2) return;
-          if ((onceMask & b) && usage[v] !== 1) return;
-        }
-        const sorted = assigned.slice().sort((a, b) => a - b), key = sorted.join(",");
-        if (!seenCombo.has(key)) { seenCombo.add(key); out.push(sorted); }
-        return;
-      }
-      if (target >= 0) {
-        const rem = 6 - i;
-        if (sumSoFar + rem * 9 < target) return;
-        if (sumSoFar + rem * 1 > target) return;
-      }
-      const d = doms[i];
-      for (let v = 1; v <= 9; v++) {
-        const b = 1 << (v - 1);
-        if (!(d & b)) continue;
-        const maxCount = (dupMask & b) ? 2 : 1;
-        if (usage[v] >= maxCount) continue;
-        if ((dupMask & b) && dupLastPos === i - 1) continue;
-        assigned[i] = v;
-        usage[v]++;
-        rec(i + 1, sumSoFar + v, (dupMask & b) ? i : dupLastPos);
-        usage[v]--;
-        if (out.length >= cap) return;
-      }
-    }
-    rec(0, 0, -2);
+    // List distinct value-COMBINATIONS (multisets) via the SHARED enumerator
+    // enumerateLine (defined in logicals.solver.js, the same code the gate and the
+    // trace's b use) instead of a third inline copy of the feasibility DFS — so
+    // this display can never drift from the classifier. Called with the replayed
+    // step domains, exactly as before; dedup/order come from the enumerator's Set.
+    const cap = 30;
+    const combosSet = enumerateLine(dom, cells, dupMask, onceMask, target, true).combos;
+    const out = [];
+    for (const key of combosSet) out.push(key.split(",").map(Number));
     const kind = target >= 0 ? "Summenkombinationen" : "Belegungen";
     const tail = whyStruck(kind);
-    // The exact count is step.b (the solver's uncapped leaf count = the number
-    // of valid assignments). The local enumeration above only lists the small
-    // cases; for larger ones show the concrete number instead of "über N".
-    if (out.length >= cap) return `<span class="lbl">Es gibt noch ${step.b || out.length} mögliche ${kind}.</span>` + tail;
+    // For big surveys show the concrete count (== step.b) instead of listing.
+    if (out.length >= cap) return `<span class="lbl">Es gibt noch ${out.length} mögliche ${kind}.</span>` + tail;
     return listOrCount(out, t => `<b>${fmtTuple(t, "+")}</b>`, kind) + tail;
   }
   if (step.ruleType === "sequence") {
