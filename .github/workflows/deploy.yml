@@ -1,0 +1,38 @@
+name: Deploy to GitHub Pages
+
+# Deployt die statische Seite (Repo-Root) nach GitHub Pages und stempelt dabei
+# die App-Version in logicals.app.js: der Platzhalter __APP_VERSION__ wird durch
+# "Commit-Datum · Short-SHA" ersetzt. Lokal über file:// bleibt er "dev".
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Version einstempeln (Datum · Short-SHA)
+        run: |
+          VER="$(git log -1 --format=%cd --date=short) · $(git rev-parse --short HEAD)"
+          echo "Stamping APP_VERSION: $VER"
+          sed -i "s|__APP_VERSION__|$VER|g" logicals.app.js
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+      - id: deployment
+        uses: actions/deploy-pages@v4

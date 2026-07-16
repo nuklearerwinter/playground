@@ -241,6 +241,7 @@
   .solution-code .code-text { flex: 1 1 220px; min-width: 0; text-align: center; }
   .solution-code .code-value { font-size: 1.05em; letter-spacing: 0.04em; font-weight: bold; color: #333; }
   .solution-code small { display: block; color: #666; margin-top: 0.3em; font-family: Georgia, serif; }
+  .solution-code .app-version { font-size: 0.75em; color: #999; margin-top: 0.4em; font-family: Georgia, serif; }
   .solution-code .qr-wrap { flex: 0 0 auto; }
   .solution-code .qr-wrap svg { display: block; width: 130px; height: 130px; background: white; padding: 4px; border-radius: 3px; }
   .solution-code .qr-wrap a.qr-link { display: inline-block; text-decoration: none; color: inherit; line-height: 0; border-radius: 3px; }
@@ -302,6 +303,7 @@
     }
     .solution-code .code-value { font-size: 9pt; letter-spacing: 0.02em; font-weight: bold; }
     .solution-code small { display: none; }
+    .solution-code .app-version { display: block; font-size: 6.5pt; color: #777; margin-top: 0.1cm; }
     .footer { display: none; }
     @page { size: A4 portrait; margin: 1.2cm; }
   }
@@ -417,6 +419,7 @@
       <div class="code-text">
         <strong>Rätselcode:</strong> <span id="code" class="code-value">—</span>
         <small>QR-Code scannen oder Code notieren, um dieses Rätsel später wieder zu öffnen.</small>
+        <div class="app-version">Version <span class="js-app-version">dev</span></div>
       </div>
       <div class="qr-wrap" id="qr-wrap"></div>
     </div>
@@ -450,7 +453,7 @@
   </dialog>
 
   <div id="error"></div>
-  <div class="footer">LOGISCH Spezial – Generator</div>
+  <div class="footer">LOGISCH Spezial – Generator · Version <span class="js-app-version">dev</span></div>
 
 <script src="qrcode.min.js"></script>
 <script src="logicals.solver.js"></script>

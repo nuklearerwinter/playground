@@ -1,6 +1,12 @@
 "use strict";
 // DOM, worker orchestration, UI. Requires logicals.solver.js loaded first.
 
+// App-Version: der Platzhalter in der Zeile unten wird beim Deploy von
+// .github/workflows/deploy.yml durch "Datum · Short-SHA" ersetzt (sed).
+// Lokal über file:// bleibt er unersetzt → wir zeigen "dev" an. So ist im
+// Frontend/Druck eindeutig erkennbar, welcher Commit-Stand deployt ist.
+const APP_VERSION = (() => { const v = "__APP_VERSION__"; return v[0] === "_" ? "dev" : v; })();
+
 // === Main-thread: worker management + UI ===
 // Prepend the shared realm-portable helpers (distinctSumRange, enumerateLine) so
 // the worker gate can call them — they live at solver top level, outside the
@@ -1133,3 +1139,6 @@ document.getElementById("step-list").addEventListener("click", (e) => {
   document.getElementById("code-input").value = code;
   loadPuzzleFromCode(code, "Code aus URL");
 })();
+
+// Version an allen dafür markierten Stellen einsetzen (Footer + Druck-Ecke).
+for (const el of document.querySelectorAll(".js-app-version")) el.textContent = APP_VERSION;
